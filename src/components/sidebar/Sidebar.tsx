@@ -7,6 +7,7 @@ import {
   Boxes,
   CalendarClock,
   Check,
+  ChevronRight,
   FolderClosed,
   FolderKanban,
   LogOut,
@@ -14,8 +15,10 @@ import {
   PanelLeft,
   Pencil,
   PenSquare,
+  Plus,
   Search,
   Settings,
+  SquarePen,
   Trash2,
   X,
 } from "lucide-react";
@@ -26,6 +29,8 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
 import { SettingsModal } from "@/components/settings/SettingsModal";
+import { ProjectForm } from "@/components/projects/ProjectForm";
+import { ProjectGlyph } from "@/components/projects/projectVisuals";
 import { cn } from "@/components/ui/cn";
 
 interface Group {
@@ -82,6 +87,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
 
   const projects = useProjectStore((s) => s.projects);
   const loadProjects = useProjectStore((s) => s.load);
+  const removeProject = useProjectStore((s) => s.remove);
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,6 +96,10 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   /** Conversation currently targeted by the "Move to project" dialog. */
   const [moveTarget, setMoveTarget] = useState<ConversationSummary | null>(null);
+  /** Ids of projects expanded to reveal their chats in the sidebar. */
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [projectEditing, setProjectEditing] = useState<ProjectSummary | null>(null);
 
   // The Projects section is populated from the shared project store; load it
   // once so the sidebar shows projects on any page (chat, schedules, …).
@@ -97,13 +107,47 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
     void loadProjects();
   }, [loadProjects]);
 
+  // Search (modal) runs over ALL chats; the flat recents list below shows only
+  // chats NOT in a project (project chats live nested under their project).
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return conversations;
     return conversations.filter((c) => c.title.toLowerCase().includes(q));
   }, [conversations, query]);
 
-  const groups = useMemo(() => groupConversations(filtered), [filtered]);
+  const recentChats = useMemo(
+    () => conversations.filter((c) => !c.projectId),
+    [conversations],
+  );
+  const groups = useMemo(() => groupConversations(recentChats), [recentChats]);
+
+  // Chats grouped by their project (input is already newest-first).
+  const chatsByProject = useMemo(() => {
+    const map: Record<string, ConversationSummary[]> = {};
+    for (const c of conversations) {
+      if (c.projectId) (map[c.projectId] ??= []).push(c);
+    }
+    return map;
+  }, [conversations]);
+
+  function toggleProject(id: string) {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleDeleteProject(p: ProjectSummary) {
+    const confirmed = window.confirm(
+      `Delete “${p.name}”? This permanently deletes the project along with its ` +
+        `${p.conversationCount} chat${p.conversationCount === 1 ? "" : "s"} and files. This can’t be undone.`,
+    );
+    if (!confirmed) return;
+    const ok = await removeProject(p.id);
+    if (ok && pathname === `/projects/${p.id}`) router.push("/projects");
+  }
 
   function openConversation(id: string) {
     router.push(`/c/${id}`);
@@ -233,32 +277,43 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         </button>
       </div>
 
-      {/* Recent projects (up to 5) — quick access to project workspaces. */}
+      {/* Projects — expandable, each revealing its chats (ChatGPT-style). */}
       {projects.length > 0 && (
-        <div className="mt-1 flex flex-col gap-0.5 px-2.5">
-          <div className="px-2 pb-1 pt-2 text-xs font-medium text-text-secondary">
-            Projects
+        <div className="group/section mt-1 flex flex-col gap-0.5 px-2.5">
+          <div className="flex items-center justify-between px-2 pb-1 pt-2">
+            <span className="text-xs font-medium text-text-secondary">Projects</span>
+            <button
+              type="button"
+              aria-label="New project"
+              title="New project"
+              onClick={() => {
+                setProjectEditing(null);
+                setProjectFormOpen(true);
+              }}
+              className="flex h-5 w-5 items-center justify-center rounded text-text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-text-primary group-hover/section:opacity-100"
+            >
+              <Plus size={15} />
+            </button>
           </div>
-          {projects.slice(0, 5).map((p) => {
-            const active = pathname === `/projects/${p.id}`;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => router.push(`/projects/${p.id}`)}
-                title={p.name}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-                  active
-                    ? "bg-hover text-text-primary"
-                    : "text-text-primary hover:bg-hover",
-                )}
-              >
-                <FolderClosed size={16} className="shrink-0 text-text-secondary" />
-                <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
-              </button>
-            );
-          })}
+          {projects.slice(0, 8).map((p) => (
+            <SidebarProjectRow
+              key={p.id}
+              project={p}
+              chats={chatsByProject[p.id] ?? []}
+              expanded={expandedProjects.has(p.id)}
+              active={pathname === `/projects/${p.id}`}
+              currentId={currentId}
+              onToggle={() => toggleProject(p.id)}
+              onOpen={() => router.push(`/projects/${p.id}`)}
+              onNewChat={() => router.push(`/?project=${p.id}`)}
+              onRename={() => {
+                setProjectEditing(p);
+                setProjectFormOpen(true);
+              }}
+              onDelete={() => void handleDeleteProject(p)}
+              onOpenChat={(id) => router.push(`/c/${id}`)}
+            />
+          ))}
         </div>
       )}
 
@@ -492,6 +547,142 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
           setMoveTarget(null);
         }}
       />
+
+      <ProjectForm
+        open={projectFormOpen}
+        project={projectEditing}
+        onClose={() => setProjectFormOpen(false)}
+        onCreated={(id) => router.push(`/projects/${id}`)}
+      />
+    </div>
+  );
+}
+
+/** One expandable project in the sidebar: caret · glyph · name, with a hover
+ *  "new chat" + kebab, and its chats nested underneath when expanded. */
+function SidebarProjectRow({
+  project,
+  chats,
+  expanded,
+  active,
+  currentId,
+  onToggle,
+  onOpen,
+  onNewChat,
+  onRename,
+  onDelete,
+  onOpenChat,
+}: {
+  project: ProjectSummary;
+  chats: ConversationSummary[];
+  expanded: boolean;
+  active: boolean;
+  currentId: string | null;
+  onToggle: () => void;
+  onOpen: () => void;
+  onNewChat: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onOpenChat: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div
+        className={cn(
+          "group/proj flex items-center rounded-lg transition-colors",
+          active ? "bg-hover" : "hover:bg-hover",
+        )}
+      >
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={expanded ? "Collapse project" : "Expand project"}
+          className="flex h-8 w-6 shrink-0 items-center justify-center text-text-secondary hover:text-text-primary"
+        >
+          <ChevronRight
+            size={14}
+            className={cn("transition-transform", expanded && "rotate-90")}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={onOpen}
+          title={project.name}
+          className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-1 text-left"
+        >
+          <ProjectGlyph id={project.id} size={20} radius={6} />
+          <span className="min-w-0 flex-1 truncate text-sm text-text-primary">
+            {project.name}
+          </span>
+        </button>
+        <div className="flex shrink-0 items-center pr-1 opacity-0 transition-opacity group-hover/proj:opacity-100">
+          <button
+            type="button"
+            onClick={onNewChat}
+            aria-label="New chat in project"
+            title="New chat in project"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-border/50 hover:text-text-primary"
+          >
+            <SquarePen size={15} />
+          </button>
+          <Dropdown
+            align="end"
+            menuClassName="min-w-[10rem]"
+            trigger={
+              <span className="flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-border/50 hover:text-text-primary">
+                <MoreHorizontal size={16} />
+              </span>
+            }
+          >
+            {(close) => (
+              <>
+                <DropdownItem
+                  onClick={() => {
+                    onRename();
+                    close();
+                  }}
+                >
+                  <Pencil size={15} /> Rename
+                </DropdownItem>
+                <DropdownItem
+                  danger
+                  onClick={() => {
+                    onDelete();
+                    close();
+                  }}
+                >
+                  <Trash2 size={15} /> Delete
+                </DropdownItem>
+              </>
+            )}
+          </Dropdown>
+        </div>
+      </div>
+
+      {expanded &&
+        (chats.length === 0 ? (
+          <p className="py-1 pl-8 pr-2 text-xs text-text-secondary">No chats yet</p>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {chats.map((c) => (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenChat(c.id)}
+                  title={c.title}
+                  className={cn(
+                    "flex w-full items-center rounded-lg py-1.5 pl-8 pr-2 text-left text-sm transition-colors",
+                    c.id === currentId
+                      ? "bg-hover text-text-primary"
+                      : "text-text-secondary hover:bg-hover hover:text-text-primary",
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
     </div>
   );
 }

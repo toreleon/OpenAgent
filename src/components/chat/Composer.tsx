@@ -25,6 +25,8 @@ export interface ComposerFullProps extends ComposerProps {
   /** Optional externally-provided initial text (e.g. from a suggestion card). */
   draft?: string;
   onDraftConsumed?: () => void;
+  /** Hide the "ChatGPT can make mistakes" line (e.g. on the project home). */
+  hideDisclaimer?: boolean;
 }
 
 /** ChatGPT-style bottom input bar with auto-growing textarea + attachments. */
@@ -38,6 +40,7 @@ export function Composer({
   onModelChange,
   draft,
   onDraftConsumed,
+  hideDisclaimer,
 }: ComposerFullProps) {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -213,9 +216,11 @@ export function Composer({
           </div>
         </div>
 
-        <p className="mt-2 text-center text-xs text-text-secondary">
-          ChatGPT can make mistakes. Check important info.
-        </p>
+        {!hideDisclaimer && (
+          <p className="mt-2 text-center text-xs text-text-secondary">
+            ChatGPT can make mistakes. Check important info.
+          </p>
+        )}
       </div>
     </div>
   );

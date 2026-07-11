@@ -13,9 +13,11 @@ import type {
   ResearchState,
   StreamEvent,
   ToolCallRecord,
+  TraceItem,
 } from "@/lib/types";
 import { DEFAULT_MODEL, DEFAULT_EFFORT } from "@/lib/types";
 import type { ReasoningEffort } from "@/lib/types";
+import { extractToolArg } from "@/lib/toolActivity";
 import { parseSSE } from "@/lib/sse";
 import { useProjectStore } from "@/store/projects";
 
@@ -64,6 +66,12 @@ export interface ChatState {
    * Null when the chat is not in a project.
    */
   activeProjectId: string | null;
+  /**
+   * A first message queued from the project page: the project chat is created
+   * server-side, then we navigate to /c/[id] where ChatApp consumes this and
+   * fires the actual send. Cleared as soon as it is consumed.
+   */
+  pendingSend: { conversationId: string; text: string; attachments: Attachment[] } | null;
 
   // ---- artifacts ----
   /** All artifacts in the current conversation, each with full version history. */
@@ -94,6 +102,18 @@ export interface ChatState {
     id: string,
     projectId: string | null,
   ) => Promise<void>;
+  /**
+   * Start a new chat inside a project from the project page: creates the
+   * conversation (attached to the project), queues `text` as its first message,
+   * and returns the new conversation id so the caller can navigate to /c/[id].
+   */
+  startProjectChat: (
+    projectId: string,
+    text: string,
+    attachments: Attachment[],
+  ) => Promise<string | null>;
+  /** Fire a queued {@link pendingSend} for `conversationId`, if any (once). */
+  consumePendingSend: (conversationId: string) => void;
   /** Open an artifact in the side panel (optionally at a specific version). */
   openArtifact: (artifactId: string, version?: number) => void;
   /** Close the artifact side panel. */
@@ -123,6 +143,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   effort: DEFAULT_EFFORT,
   deepResearch: false,
   activeProjectId: null,
+  pendingSend: null,
 
   artifacts: [],
   openArtifactId: null,
@@ -241,6 +262,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  startProjectChat: async (projectId, text, attachments) => {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      if (!res.ok) throw new Error("Failed to start chat");
+      const convo = (await res.json()) as ConversationSummary;
+      set({ pendingSend: { conversationId: convo.id, text: trimmed, attachments } });
+      // Surface the new chat in the sidebar immediately.
+      void get().loadConversations();
+      return convo.id;
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : "Failed to start chat" });
+      return null;
+    }
+  },
+
+  consumePendingSend: (conversationId) => {
+    const pending = get().pendingSend;
+    if (!pending || pending.conversationId !== conversationId) return;
+    // Clear before sending so a re-run (e.g. StrictMode) can't double-fire.
+    set({ pendingSend: null });
+    void get().sendMessage(pending.text, pending.attachments, { conversationId });
+  },
+
   openArtifact: (artifactId, version) => {
     set({
       openArtifactId: artifactId,
@@ -293,6 +343,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     abortController = new AbortController();
     const toolCalls: ToolCallRecord[] = [];
+    // Ordered interleaved trace (reasoning segments + tool rows) built live from
+    // the SSE stream, mirroring what the server persists as `timeline`.
+    const timeline: TraceItem[] = [];
     assistantIdRef.current = assistantId;
     reasoningStartRef.current = null;
     reasoningDoneRef.current = false;
@@ -334,7 +387,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       for await (const event of parseSSE(res)) {
-        applyEvent(event, assistantId, toolCalls, set);
+        applyEvent(event, assistantId, toolCalls, timeline, set);
       }
 
       // Refresh sidebar list so titles / ordering reflect the new exchange.
@@ -449,6 +502,7 @@ function applyEvent(
   event: StreamEvent,
   assistantId: string,
   toolCalls: ToolCallRecord[],
+  timeline: TraceItem[],
   set: SetState,
 ) {
   switch (event.type) {
@@ -470,6 +524,19 @@ function applyEvent(
       if (reasoningStartRef.current === null) {
         reasoningStartRef.current = Date.now();
       }
+      // Append to the open reasoning segment, or start a new one if the most
+      // recent timeline item is a tool row — this is what preserves the
+      // think → act → think chronology across tool calls.
+      const last = timeline[timeline.length - 1];
+      if (last && last.type === "reasoning") {
+        timeline[timeline.length - 1] = {
+          type: "reasoning",
+          text: last.text + event.text,
+        };
+      } else {
+        timeline.push({ type: "reasoning", text: event.text });
+      }
+      const snapshot = [...timeline];
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === id
@@ -477,6 +544,7 @@ function applyEvent(
                 ...m,
                 reasoning: (m.reasoning ?? "") + event.text,
                 reasoningStreaming: true,
+                timeline: snapshot,
               } as StreamingChatMessage)
             : m,
         ),
@@ -484,13 +552,18 @@ function applyEvent(
       break;
     }
     case "reasoning_done": {
-      finishReasoning(assistantIdRef.current ?? assistantId, set);
+      // NOT a reliable "thinking finished" signal: the model emits it after the
+      // FIRST reasoning summary segment, which — on interleaved think→tool→think
+      // turns — happens well before the answer. Finishing here would latch the
+      // trace and later reasoning/tool events could never re-close it, leaving a
+      // stuck "Thinking…" shimmer. The thinking phase ends when the answer starts
+      // (first `delta`) or the turn ends (`done`/`error`); finish there instead.
       break;
     }
     case "delta": {
       const id = assistantIdRef.current ?? assistantId;
-      // Answer text has begun; if a reasoning summary was streaming and never
-      // received an explicit `reasoning_done`, collapse it now (per contract §9).
+      // Answer text has begun — the thinking phase is over. Collapse the trace
+      // and freeze the duration (including any tool time) now.
       if (!reasoningDoneRef.current && reasoningStartRef.current !== null) {
         finishReasoning(id, set);
       }
@@ -503,15 +576,31 @@ function applyEvent(
     }
     case "tool_call": {
       const id = assistantIdRef.current ?? assistantId;
-      const record: ToolCallRecord = {
-        id: `${event.name}-${toolCalls.length}`,
-        name: event.name,
-        args: event.args,
-      };
-      toolCalls.push(record);
+      // A tool call means the "thinking" phase has begun even if no reasoning
+      // summary preceded it, so the live trace shows for tool-only turns too.
+      if (reasoningStartRef.current === null) {
+        reasoningStartRef.current = Date.now();
+      }
+      const recordId = `${event.name}-${toolCalls.length}`;
+      toolCalls.push({ id: recordId, name: event.name, args: event.args });
+      timeline.push({
+        type: "tool",
+        id: recordId,
+        tool: event.name,
+        arg: extractToolArg(event.name, event.args),
+        status: "running",
+      });
+      const snapshot = [...timeline];
       set((s) => ({
         messages: s.messages.map((m) =>
-          m.id === id ? { ...m, toolCalls: [...toolCalls] } : m,
+          m.id === id
+            ? ({
+                ...m,
+                toolCalls: [...toolCalls],
+                reasoningStreaming: true,
+                timeline: snapshot,
+              } as StreamingChatMessage)
+            : m,
         ),
       }));
       break;
@@ -525,9 +614,20 @@ function applyEvent(
           break;
         }
       }
+      // Flip the matching running tool row in the timeline to done.
+      for (let i = timeline.length - 1; i >= 0; i--) {
+        const it = timeline[i];
+        if (it.type === "tool" && it.tool === event.name && it.status === "running") {
+          timeline[i] = { ...it, status: "done" };
+          break;
+        }
+      }
+      const snapshot = [...timeline];
       set((s) => ({
         messages: s.messages.map((m) =>
-          m.id === id ? { ...m, toolCalls: [...toolCalls] } : m,
+          m.id === id
+            ? { ...m, toolCalls: [...toolCalls], timeline: snapshot }
+            : m,
         ),
       }));
       break;

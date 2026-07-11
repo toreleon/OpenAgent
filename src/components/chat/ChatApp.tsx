@@ -84,7 +84,11 @@ export function ChatApp({ conversationId }: ChatAppProps) {
       }
 
       await loadConversation(conversationId);
-      if (!cancelled && requestedArtifactId) {
+      if (cancelled) return;
+      // If this conversation was just started from a project page, fire its
+      // queued first message now that the chat view is mounted.
+      useChatStore.getState().consumePendingSend(conversationId);
+      if (requestedArtifactId) {
         const loadedArtifact = useChatStore
           .getState()
           .artifacts.some((artifact) => artifact.id === requestedArtifactId);

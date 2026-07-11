@@ -2,40 +2,51 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, FolderKanban, MessageSquare, Plus, X } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
+import type { ProjectSummary } from "@/lib/types";
 import { useProjectStore } from "@/store/projects";
 import { useChatStore } from "@/store/chat";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { cn } from "@/components/ui/cn";
 import { ProjectForm } from "./ProjectForm";
+import { ProjectGlyph, relativeTime } from "./projectVisuals";
 
-/**
- * Top-level client app for the /projects route. Mirrors the ChatApp shell
- * (collapsible sidebar + content column) so navigation between chats and
- * projects feels seamless, then renders the project grid, empty state, error
- * banner, and the create modal.
- */
+/** ChatGPT-style Projects overview: a clean list of the user's projects. */
 export function ProjectsApp() {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<ProjectSummary | null>(null);
 
   const projects = useProjectStore((s) => s.projects);
   const loading = useProjectStore((s) => s.loading);
   const error = useProjectStore((s) => s.error);
   const load = useProjectStore((s) => s.load);
+  const remove = useProjectStore((s) => s.remove);
   const clearError = useProjectStore((s) => s.clearError);
 
-  // The shared Sidebar reads the conversation list from the chat store; load it
-  // here too so the left rail is populated when landing directly on /projects.
   const loadConversations = useChatStore((s) => s.loadConversations);
 
   useEffect(() => {
     void load();
     void loadConversations();
   }, [load, loadConversations]);
+
+  function openCreate() {
+    setEditing(null);
+    setFormOpen(true);
+  }
+
+  async function handleDelete(p: ProjectSummary) {
+    const confirmed = window.confirm(
+      `Delete “${p.name}”? This permanently deletes the project along with its ` +
+        `${p.conversationCount} chat${p.conversationCount === 1 ? "" : "s"} and files. This can’t be undone.`,
+    );
+    if (confirmed) void remove(p.id);
+  }
 
   const isEmpty = projects.length === 0;
 
@@ -51,15 +62,13 @@ export function ProjectsApp() {
       </div>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
-          <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-            <FolderKanban size={18} className="text-text-secondary" />
-            Projects
+        <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-between">
+            <h1 className="text-lg font-semibold text-text-primary">Projects</h1>
+            <Button size="sm" onClick={openCreate}>
+              <Plus size={16} /> New project
+            </Button>
           </div>
-          <Button size="sm" onClick={() => setFormOpen(true)}>
-            <Plus size={16} /> New project
-          </Button>
         </header>
 
         {error && (
@@ -76,55 +85,80 @@ export function ProjectsApp() {
           </div>
         )}
 
-        {/* Main area */}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-3xl px-4 py-6">
+          <div className="mx-auto w-full max-w-3xl px-4 py-4">
             {loading && isEmpty ? (
               <div className="flex items-center justify-center py-20 text-text-secondary">
                 <Spinner size={22} />
               </div>
             ) : isEmpty ? (
-              <EmptyState onCreate={() => setFormOpen(true)} />
+              <EmptyState onCreate={openCreate} />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <ul className="flex flex-col">
                 {projects.map((p) => (
-                  <button
+                  <li
                     key={p.id}
-                    type="button"
-                    onClick={() => router.push(`/projects/${p.id}`)}
-                    className="flex flex-col rounded-2xl border border-border p-4 text-left transition-colors hover:bg-hover"
+                    className="group relative flex items-center gap-3 rounded-xl px-3 py-3 transition-colors hover:bg-hover"
                   >
-                    <div className="flex items-center gap-2">
-                      <FolderKanban
-                        size={16}
-                        className="shrink-0 text-text-secondary"
-                      />
-                      <span className="min-w-0 truncate text-sm font-medium text-text-primary">
-                        {p.name}
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/projects/${p.id}`)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <ProjectGlyph id={p.id} size={36} />
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate text-sm font-medium text-text-primary">
+                          {p.name}
+                        </span>
+                        <span className="truncate text-xs text-text-secondary">
+                          {p.conversationCount} chat
+                          {p.conversationCount === 1 ? "" : "s"}
+                          {p.fileCount > 0
+                            ? ` · ${p.fileCount} file${p.fileCount === 1 ? "" : "s"}`
+                            : ""}
+                        </span>
                       </span>
+                    </button>
+                    <span className="shrink-0 text-xs tabular-nums text-text-secondary group-hover:hidden">
+                      {relativeTime(p.updatedAt)}
+                    </span>
+                    <div className="hidden group-hover:block">
+                      <Dropdown
+                        align="end"
+                        menuClassName="min-w-[10rem]"
+                        trigger={
+                          <span className="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary hover:bg-border/50 hover:text-text-primary">
+                            <MoreHorizontal size={16} />
+                          </span>
+                        }
+                      >
+                        {(close) => (
+                          <>
+                            <DropdownItem
+                              onClick={() => {
+                                setEditing(p);
+                                setFormOpen(true);
+                                close();
+                              }}
+                            >
+                              <Pencil size={15} /> Rename
+                            </DropdownItem>
+                            <DropdownItem
+                              danger
+                              onClick={() => {
+                                void handleDelete(p);
+                                close();
+                              }}
+                            >
+                              <Trash2 size={15} /> Delete
+                            </DropdownItem>
+                          </>
+                        )}
+                      </Dropdown>
                     </div>
-                    {p.description ? (
-                      <p className="mt-1.5 line-clamp-2 text-sm text-text-secondary">
-                        {p.description}
-                      </p>
-                    ) : (
-                      <p className="mt-1.5 text-sm italic text-text-secondary/70">
-                        No description
-                      </p>
-                    )}
-                    <div className="mt-3 flex items-center gap-3 text-xs text-text-secondary">
-                      <span className="inline-flex items-center gap-1">
-                        <MessageSquare size={12} />
-                        {p.conversationCount} chats
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <FileText size={12} />
-                        {p.fileCount} files
-                      </span>
-                    </div>
-                  </button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </div>
         </div>
@@ -132,8 +166,9 @@ export function ProjectsApp() {
 
       <ProjectForm
         open={formOpen}
-        project={null}
+        project={editing}
         onClose={() => setFormOpen(false)}
+        onCreated={(id) => router.push(`/projects/${id}`)}
       />
     </div>
   );
@@ -141,16 +176,14 @@ export function ProjectsApp() {
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 py-16 text-center">
-      <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-hover text-text-secondary">
-        <FolderKanban size={24} />
-      </span>
-      <h2 className="text-base font-semibold text-text-primary">
+    <div className="mt-6 flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 py-16 text-center">
+      <ProjectGlyph id="empty-projects-state" size={48} radius={14} />
+      <h2 className="mt-4 text-base font-semibold text-text-primary">
         No projects yet
       </h2>
       <p className="mt-1 max-w-sm text-sm text-text-secondary">
-        Group related conversations into a workspace with shared instructions
-        and knowledge files that every chat can draw on.
+        Projects keep chats, files, and instructions together in one place — so
+        every conversation shares the same context.
       </p>
       <Button className="mt-5" size="sm" onClick={onCreate}>
         <Plus size={16} /> New project
