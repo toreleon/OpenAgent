@@ -11,6 +11,7 @@ import {
   Loader2,
   PenLine,
   Search,
+  Sparkles,
   Terminal,
   Wrench,
   type LucideIcon,
@@ -32,6 +33,7 @@ const ICONS: Record<ReturnType<typeof toolActivityIcon>, LucideIcon> = {
   folder: FolderOpen,
   search: Search,
   clock: Clock,
+  skill: Sparkles,
   tool: Wrench,
 };
 

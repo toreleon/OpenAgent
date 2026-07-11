@@ -14,6 +14,9 @@ dev.db-journal
 # Per-conversation coding-agent sandboxes (src/lib/sandbox/confine.ts). Scratch
 # working trees — never commit them.
 /.workspaces
+# Installed Claude plugins (src/lib/plugins/*). Cloned/copied per user — never
+# commit them.
+/.plugins
 *.log
 .DS_Store
 next-env.d.ts

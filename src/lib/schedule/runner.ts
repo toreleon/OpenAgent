@@ -9,6 +9,7 @@
  */
 import prisma from "@/lib/db";
 import { runChatCompletion } from "@/lib/agent";
+import { loadSkillsContext } from "@/lib/plugins/context";
 import { computeNextRun } from "@/lib/schedule/cron";
 import type { ChatMessage, ReasoningEffort, ScheduleTrigger } from "@/lib/types";
 
@@ -85,7 +86,10 @@ async function executeScheduleRun(
     };
 
     // 5) Run the agent to completion. runChatCompletion never throws; a failure
-    //    is surfaced on result.error alongside whatever was assembled.
+    //    is surfaced on result.error alongside whatever was assembled. Scheduled
+    //    runs get the same "Available skills" block as interactive chat, so an
+    //    installed skill applies whether the task fires from a schedule or a chat.
+    const skillsContext = (await loadSkillsContext(schedule.userId)) || undefined;
     const result = await runChatCompletion({
       model: schedule.model,
       conversationId,
@@ -93,6 +97,7 @@ async function executeScheduleRun(
       userMessage,
       effort: schedule.effort as ReasoningEffort,
       userId: schedule.userId,
+      skillsContext,
     });
 
     // 6) Persist the assistant reply (JSON columns mirror the chat route).

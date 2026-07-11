@@ -21,6 +21,7 @@ export type ToolIconKey =
   | "folder"
   | "search"
   | "clock"
+  | "skill"
   | "tool";
 
 /** Read a string field off an unknown args object, tolerating any shape. */
@@ -82,6 +83,8 @@ export function extractToolArg(tool: string, args: unknown): string | undefined 
       const p = argStr(args, "path");
       return p && p !== "." ? basename(p) : undefined;
     }
+    case "skill":
+      return truncate(argStr(args, "name") ?? "", 48) || undefined;
     case "run_javascript":
     case "get_current_time":
       return undefined;
@@ -175,6 +178,12 @@ export function toolActivityLabel(
     case "get_current_time":
       verbs = { run: "Checking the time", done: "Checked the time", fail: "Couldn't check the time" };
       break;
+    case "skill":
+      verbs = withArg(
+        { run: `Using the ${arg} skill`, done: `Used the ${arg} skill`, fail: `Couldn't load the ${arg} skill` },
+        { run: "Using a skill", done: "Used a skill", fail: "Couldn't load the skill" },
+      );
+      break;
     default: {
       const name = humanizeToolName(tool);
       verbs = withArg(
@@ -210,6 +219,8 @@ export function toolActivityIcon(tool: string): ToolIconKey {
       return "search";
     case "get_current_time":
       return "clock";
+    case "skill":
+      return "skill";
     default:
       return "tool";
   }

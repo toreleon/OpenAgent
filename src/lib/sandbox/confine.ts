@@ -354,6 +354,16 @@ export function conversationIdFromContext(ctx: unknown): string | undefined {
   return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
+/** Extract the owning userId threaded via the same RunContext
+ *  (run(agent, input, { context: { conversationId, userId } })). Used by the
+ *  `skill` tool to load the calling user's installed skills. Returns undefined
+ *  when absent so the tool can fail gracefully. */
+export function userIdFromContext(ctx: unknown): string | undefined {
+  const c = (ctx as { context?: { userId?: unknown } } | undefined)?.context;
+  const id = c?.userId;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 /** Uniform "no workspace bound" result for when RunContext lacks a
  *  conversationId (e.g. a tool somehow invoked outside a chat run). */
 export function noWorkspaceResult() {

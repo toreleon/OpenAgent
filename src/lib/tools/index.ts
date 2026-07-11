@@ -10,6 +10,7 @@ import { grepSearchTool } from "./grep-search";
 import { editFileTool } from "./edit-file";
 import { writeFileTool } from "./write-file";
 import { runShellTool } from "./run-shell";
+import { skillTool } from "./skill";
 
 /**
  * The full set of tools available to the chat agent. Order is not significant;
@@ -46,6 +47,10 @@ export const agentTools: Tool[] = [
   editFileTool,
   writeFileTool,
   runShellTool,
+  // Installed plugin skills (progressive disclosure). No-op when the user has no
+  // enabled skills — it just reports "no such skill". Reads the calling user's
+  // skills via the RunContext userId (see src/lib/agent.ts), never a model arg.
+  skillTool,
 ];
 
 export {
@@ -61,4 +66,5 @@ export {
   editFileTool,
   writeFileTool,
   runShellTool,
+  skillTool,
 };

@@ -58,6 +58,15 @@ export interface StreamChatParams {
    * the base INSTRUCTIONS. Omitted for conversations not in a project.
    */
   projectContext?: string;
+  /**
+   * The LEVEL-1 "Available skills" block for this user's installed plugin
+   * skills, already composed by
+   * {@link import("@/lib/plugins/context").loadSkillsContext}. Appended after
+   * the base INSTRUCTIONS (and any projectContext). The model pulls a skill's
+   * full body on demand via the `skill` tool. Omitted when the user has no
+   * enabled skills.
+   */
+  skillsContext?: string;
 }
 
 const INSTRUCTIONS = `You are a helpful, knowledgeable, and friendly AI assistant, similar to ChatGPT.
@@ -315,12 +324,17 @@ export async function* streamChat(
     );
   };
 
-  // Project-scoped conversations get their custom instructions + knowledge
-  // appended to the base system prompt for this run.
-  const projectContext = params.projectContext?.trim();
-  const instructions = projectContext
-    ? `${INSTRUCTIONS}\n\n${projectContext}`
-    : INSTRUCTIONS;
+  // Project-scoped conversations get their custom instructions + knowledge, and
+  // users with installed plugins get their "Available skills" list, appended to
+  // the base system prompt for this run (project context first, then skills).
+  const extraBlocks = [
+    params.projectContext?.trim(),
+    params.skillsContext?.trim(),
+  ].filter((b): b is string => !!b);
+  const instructions =
+    extraBlocks.length > 0
+      ? `${INSTRUCTIONS}\n\n${extraBlocks.join("\n\n")}`
+      : INSTRUCTIONS;
 
   let agent: Agent;
   try {
@@ -364,7 +378,7 @@ export async function* streamChat(
     const streamed = await run(agent, input, {
       stream: true,
       maxTurns: 50,
-      context: { conversationId },
+      context: { conversationId, userId: params.userId },
     });
 
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
@@ -491,13 +505,18 @@ export async function runChatCompletion(
 
   const startedAt = Date.now();
 
-  try {
+  // Drain one streamChat run into the accumulators. On a retry pass we suppress
+  // reasoning so the first attempt's summary + duration aren't doubled (mirrors
+  // the /api/chat consumeChat helper).
+  const drain = async (suppressReasoning: boolean) => {
     for await (const event of streamChat(params)) {
       switch (event.type) {
         case "reasoning_delta":
+          if (suppressReasoning) break;
           reasoning += event.text;
           break;
         case "reasoning_done":
+          if (suppressReasoning) break;
           if (reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
           break;
         case "delta":
@@ -524,6 +543,16 @@ export async function runChatCompletion(
         default:
           break;
       }
+    }
+  };
+
+  try {
+    await drain(false);
+    // Retry once if the model produced nothing (a reasoning-only response with no
+    // answer text and no tool call). Mirrors the /api/chat retry so scheduled runs
+    // and other non-streaming callers don't persist a blank reply.
+    if (!error && content.trim() === "" && toolCalls.length === 0) {
+      await drain(true);
     }
   } catch (err) {
     error =
