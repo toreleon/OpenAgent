@@ -205,6 +205,45 @@ and disables tracing for non-OpenAI endpoints. See the Azure note under **Known 
 
 ---
 
+## Web search & fetch tools
+
+Two built-in tools give the agent access to the live web:
+
+- **`web_search`** — runs a query against a pluggable search backend and returns a ranked list of
+  results (title, URL, snippet) for the model to reason over or hand to `web_fetch`.
+- **`web_fetch`** — downloads a single URL and returns **cleaned Markdown** (readability extraction →
+  Markdown; PDFs are parsed too), so the model gets readable content instead of raw HTML.
+
+### Zero-key by default, upgrade with a key
+
+Both tools work with **no configuration**. Out of the box `web_search` scrapes **DuckDuckGo HTML**,
+which is keyless but **fragile** (it can break when the page markup changes and is easy to rate-limit).
+For reliable results, set one credential and it is auto-selected by precedence
+(`tavily` > `serper` > `brave` > `searxng` > `duckduckgo`), or pin one explicitly with
+`WEB_SEARCH_PROVIDER`:
+
+- `TAVILY_API_KEY` — Tavily, an LLM-oriented search API (**recommended**).
+- `SERPER_API_KEY` — Serper (Google SERP API).
+- `BRAVE_API_KEY` — Brave Search API.
+- `SEARXNG_URL` — a self-hosted, **keyless** SearXNG instance (JSON format enabled).
+
+See the **Web tools** block in `.env.example` for every knob, including `web_fetch`'s size/timeout caps
+(`WEBFETCH_MAX_BYTES`, `WEBFETCH_TIMEOUT_MS`) and the opt-in model-extraction pass
+(`WEBFETCH_EXTRACT_MODEL`).
+
+### Security posture
+
+- **SSRF-guarded.** Every outbound request goes through a hardened fetch (`src/lib/net/safe-fetch.ts`)
+  that resolves DNS and **blocks loopback / private / link-local / reserved ranges** (including cloud
+  metadata endpoints like `169.254.169.254`), rejects bad schemes and embedded credentials, and
+  re-validates each redirect hop. Private-network access is off unless you set
+  `WEBFETCH_ALLOW_PRIVATE_NETWORK=1` (**local dev only**).
+- **Untrusted content.** Fetched page text is treated as **data, not instructions**: `web_fetch` wraps
+  it in a `<web_content untrusted="true">…</web_content>` envelope and its tool description tells the
+  model to ignore any instructions found inside — a basic guard against prompt injection from web pages.
+
+---
+
 ## MCP Connectors
 
 Connectors are remote **MCP** (Model Context Protocol) servers spoken over **Streamable HTTP**
