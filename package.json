@@ -14,6 +14,8 @@
     "@openai/agents": "^0.0.5",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
+    "cron-parser": "^4.9.0",
+    "cronstrue": "^2.59.0",
     "highlight.js": "^11.10.0",
     "katex": "^0.16.47",
     "lucide-react": "^0.456.0",

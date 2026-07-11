@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
+  CalendarClock,
   Check,
   LogOut,
   MoreHorizontal,
@@ -63,6 +64,7 @@ export interface SidebarProps {
 
 export function Sidebar({ open, onToggle }: SidebarProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const { data: session } = useSession();
   const conversations = useChatStore((s) => s.conversations);
   const currentId = useChatStore((s) => s.currentId);
@@ -92,6 +94,8 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
     router.push("/");
   }
 
+  const schedulesActive = pathname === "/schedules";
+
   function beginRename(c: ConversationSummary) {
     setEditingId(c.id);
     setEditValue(c.title);
@@ -117,6 +121,13 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         <IconButton label="New chat" onClick={handleNewChat}>
           <PenSquare size={20} />
         </IconButton>
+        <IconButton
+          label="Scheduled"
+          active={schedulesActive}
+          onClick={() => router.push("/schedules")}
+        >
+          <CalendarClock size={20} />
+        </IconButton>
       </div>
     );
   }
@@ -133,8 +144,8 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         </IconButton>
       </div>
 
-      {/* New chat button */}
-      <div className="px-2.5">
+      {/* New chat + Scheduled nav */}
+      <div className="flex flex-col gap-0.5 px-2.5">
         <button
           type="button"
           onClick={handleNewChat}
@@ -142,6 +153,19 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         >
           <PenSquare size={18} />
           New chat
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push("/schedules")}
+          className={cn(
+            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+            schedulesActive
+              ? "bg-hover text-text-primary"
+              : "text-text-primary hover:bg-hover",
+          )}
+        >
+          <CalendarClock size={18} />
+          Scheduled
         </button>
       </div>
 

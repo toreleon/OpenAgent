@@ -16,6 +16,7 @@ import type {
   StreamEvent,
   Attachment,
   ReasoningEffort,
+  ToolCallRecord,
 } from "@/lib/types";
 import { DEFAULT_EFFORT } from "@/lib/types";
 import { agentTools } from "@/lib/tools";
@@ -56,7 +57,17 @@ Guidelines:
 - Use the run_javascript tool for arithmetic, data transformation, or quick computations rather than doing error-prone math in your head.
 - Use the get_current_time tool when the user asks about the current date or time, or when you need to compute relative dates.
 - If the user shares an image, look at it carefully and describe or reason about its contents as needed.
-- Never claim to have taken real-world actions you cannot perform. Be honest about your limitations.`;
+- Never claim to have taken real-world actions you cannot perform. Be honest about your limitations.
+
+Artifacts:
+- You can create "artifacts" — substantial, self-contained pieces of content shown to the user in a dedicated side panel — using the create_artifact, update_artifact, and rewrite_artifact tools.
+- CREATE an artifact for content the user will likely keep, edit, run, or preview: code files or components longer than ~15 lines, complete programs, full documents/essays, HTML pages, SVG images, Mermaid diagrams, or interactive React components.
+- Do NOT use artifacts for short snippets, one-off examples, or content that only makes sense inline in the conversation. When in doubt for something small, just use a normal fenced code block in your reply.
+- Choose the right \`type\`: 'code' (set \`language\`), 'markdown', 'html' (a complete self-contained page), 'svg', 'mermaid', or 'react'.
+- For 'react': write a single self-contained component and make it the DEFAULT export (e.g. \`export default function App() { ... }\`). Import React hooks and any libraries you use (react, recharts, lucide-react, framer-motion, d3, three are available). Use Tailwind classes for styling. Do not read from files, the network, or environment variables.
+- For 'html': output a complete document; you may use <script> and <style> and load libraries from a CDN.
+- Keep ONE artifact per distinct deliverable, and give it a short kebab-case \`identifier\`. To revise an existing artifact, call update_artifact (small exact-substring edits) or rewrite_artifact (larger changes) with the SAME identifier — do not create a new one.
+- After creating or updating an artifact, briefly describe it in your reply; do NOT paste the artifact's full content back into the message.`;
 
 let clientConfigured = false;
 
@@ -402,4 +413,91 @@ export async function* streamChat(
     // Always release MCP connections after the run completes or errors.
     await closeServers();
   }
+}
+
+/**
+ * The fully-assembled result of a non-streaming agent run. Used by the scheduler
+ * (and any server-side caller) that needs the complete reply rather than an SSE
+ * stream.
+ */
+export interface RunChatResult {
+  /** The assembled assistant answer text. */
+  content: string;
+  /** Reasoning summary text, if the model produced one. */
+  reasoning?: string;
+  /** Time spent producing the reasoning summary, in ms. */
+  reasoningMs?: number;
+  /** Tool calls made during the run, with outputs attached where available. */
+  toolCalls: ToolCallRecord[];
+  /** Set to the error message if the run failed (content may be partial). */
+  error?: string;
+}
+
+/**
+ * Run the agent to completion by draining {@link streamChat} server-side and
+ * assembling the full result. This is the non-streaming counterpart to the SSE
+ * path in /api/chat and shares the exact same agent configuration and event
+ * semantics (see CONTRACTS.md §9). It never throws: transport/model failures are
+ * surfaced on {@link RunChatResult.error} alongside whatever was assembled.
+ */
+export async function runChatCompletion(
+  params: StreamChatParams,
+): Promise<RunChatResult> {
+  let content = "";
+  let reasoning = "";
+  let reasoningMs: number | undefined;
+  const toolCalls: ToolCallRecord[] = [];
+  let toolSeq = 0;
+  let error: string | undefined;
+
+  const startedAt = Date.now();
+
+  try {
+    for await (const event of streamChat(params)) {
+      switch (event.type) {
+        case "reasoning_delta":
+          reasoning += event.text;
+          break;
+        case "reasoning_done":
+          if (reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
+          break;
+        case "delta":
+          content += event.text;
+          break;
+        case "tool_call":
+          toolCalls.push({
+            id: `tool_${toolSeq++}`,
+            name: event.name,
+            args: event.args,
+          });
+          break;
+        case "tool_result":
+          for (let i = toolCalls.length - 1; i >= 0; i--) {
+            if (toolCalls[i].name === event.name && toolCalls[i].output === undefined) {
+              toolCalls[i].output = event.output;
+              break;
+            }
+          }
+          break;
+        case "error":
+          error = event.message;
+          break;
+        default:
+          break;
+      }
+    }
+  } catch (err) {
+    error =
+      err instanceof Error
+        ? err.message
+        : "The assistant failed to generate a response.";
+  }
+
+  return {
+    content,
+    reasoning: reasoning.length > 0 ? reasoning : undefined,
+    reasoningMs,
+    toolCalls,
+    error,
+  };
 }

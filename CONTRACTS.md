@@ -679,3 +679,106 @@ If `reasoning_done` is never observed but answer `delta`s start, emit
   `type:"reasoning"` whose `summary` is an array of `{ type:"summary_text", text }`
   → `response.output[?type=="reasoning"].summary[].text`. The top-level request
   echo `reasoning:{effort,summary}` is also present.
+
+---
+
+## 10. Scheduled tasks (authoritative)
+
+Claude-Desktop-style **automations**: a saved prompt + cron schedule fires on its own
+cadence. **New conversation per run** — each fire seeds a brand-new `Conversation`
+(with the schedule's prompt as the first user message), runs the agent as the owning
+user, persists the assistant reply, and links the thread back via
+`Conversation.scheduleId`. Every fire attempt is logged as a `ScheduleRun`. The UI lives
+at `/schedules`.
+
+### Data model (Prisma — Foundation, fixed; do NOT edit the schema)
+- `Schedule` — `id`, `userId`, `title`, `prompt`, `model`, `effort` (String, default
+  `"medium"`), `cron` (String, 5-field), `timezone` (String, default `"UTC"`),
+  `enabled` (Boolean, default true), `nextRunAt` (DateTime?), `lastRunAt` (DateTime?),
+  `createdAt`, `updatedAt`. Relations: `user`, `runs` (`ScheduleRun[]`),
+  `conversations` (`Conversation[]`).
+- `ScheduleRun` — `id`, `scheduleId`, `status` (String, default `"running"` →
+  `"running" | "success" | "error"`), `trigger` (String, default `"cron"` →
+  `"cron" | "manual"`), `conversationId` (String?), `error` (String?), `startedAt`
+  (DateTime, default now), `finishedAt` (DateTime?). Relation `schedule` with real FK
+  `onDelete: Cascade`.
+- `Conversation.scheduleId` (String?) — new nullable column. **Caveat:** SQLite could
+  not add the FK via `ALTER`, so there is **NO database-level FK** from
+  `Conversation.scheduleId → Schedule`. Therefore `DELETE /api/schedules/[id]` MUST
+  manually null `Conversation.scheduleId` for that schedule **before** deleting the
+  `Schedule` (only `ScheduleRun` rows cascade, via their real FK).
+
+### DTOs (from `@/lib/types` — Foundation, already exists)
+`ScheduleTrigger`, `ScheduleRunStatus`, `ScheduleRunSummary`, `ScheduleSummary`
+(adds enriched `description` + `lastRun`), `ScheduleDetail` (adds `runs[]`),
+`CreateScheduleRequest`, `UpdateScheduleRequest`, `CronPreviewResponse`,
+`CronTriggerResult`. Dates serialize as `toISOString()`; `null` stays `null`.
+
+### `src/lib/schedule/cron.ts` (SERVER-ONLY — never import from a client component)
+- `DEFAULT_TIMEZONE = "UTC"`, `PREVIEW_RUN_COUNT = 3`.
+- `isValidTimeZone(tz)`, `normalizeTimeZone(tz)` → valid IANA or `"UTC"`.
+- `describeCron(expr)` (cronstrue, safe fallback).
+- `validateCron(expr)` → `{ valid, description?, error? }` (requires 5 fields).
+- `computeNextRun(expr, timezone, from?=now)` → next fire strictly after `from`, in `tz`.
+- `nextRuns(expr, timezone, count?=3, from?=now)` → `Date[]`.
+
+### `src/lib/schedule/presets.ts` (PURE, client-safe — no external deps)
+- `PresetId = "hourly" | "daily" | "weekdays" | "weekly" | "monthly" | "custom"`.
+- `SchedulePreset`, `SCHEDULE_PRESETS`, `WEEKDAYS`, `PresetOptions`.
+- `buildCron(preset, opts?)` → cron string; `detectPreset(cron)` → `{ preset } & PresetOptions`.
+
+### `src/lib/schedule/runner.ts` (frozen API — others import it)
+- `runDueSchedules(opts?: { now?, wait? })` → `{ started }`.
+  - Finds enabled schedules with `nextRunAt <= now`.
+  - Claims each **atomically** via compare-and-swap on `nextRunAt`:
+    `updateMany({ where: { id, nextRunAt: <exact current value>, enabled: true },
+    data: { nextRunAt: computeNextRun(cron, timezone, now), lastRunAt: now } })` — proceed
+    only when the update count `=== 1`. This is what prevents ticker + cron double-firing.
+  - `wait === true` → await every claimed run (used by `/api/cron` so serverless finishes
+    the work); `wait === false` → fire-and-forget, return the claimed count immediately
+    (used by the ticker). Returns `{ started }` = schedules claimed this tick.
+- `runScheduleNow(scheduleId, userId)` →
+  `{ runId, conversationId } | null`. Ownership check (`schedule.userId === userId`;
+  `null` if missing/not owned). `trigger = "manual"`; does **not** shift
+  `nextRunAt`/`lastRunAt` (manual runs never change the cadence).
+- Internal `executeScheduleRun` per fire: (1) create `ScheduleRun` `running`; (2) create
+  `Conversation { userId, title, model, scheduleId }`; (3) set `ScheduleRun.conversationId`;
+  (4) persist user `Message` (the prompt); (5) `runChatCompletion({ model, history:[],
+  userMessage, effort, userId })`; (6) persist assistant `Message` (`toolCalls`/`reasoning`/
+  `reasoningMs`; JSON columns store `JSON.stringify(arr)` when non-empty else `null`);
+  (7) bump `Conversation.updatedAt`; (8) update `ScheduleRun` → `success`/`error` + `error`
+  + `finishedAt`. Wrapped in try/catch so one schedule's failure never aborts the loop.
+
+### `src/lib/schedule/ticker.ts`
+- `startScheduler()` — idempotent (guard on `globalThis`); `setInterval(60s)` →
+  `runDueSchedules({ wait: false })`, plus one warm-up tick ~5s after boot; the interval
+  handle is stored on `globalThis` (HMR-safe). Started from the Next.js **instrumentation**
+  hook only when `SCHEDULER_ENABLED=1`.
+
+### API routes (all `runtime="nodejs"`; auth required unless noted)
+- `GET /api/schedules` — `ScheduleSummary[]` (this user's, newest first; enrich
+  `description` + `lastRun`).
+- `POST /api/schedules` — **201** `ScheduleSummary`. Validate cron (**400** on invalid),
+  normalize tz, compute `nextRunAt` (`enabled ? computeNextRun : null`). Body:
+  `CreateScheduleRequest`.
+- `GET /api/schedules/preview?cron=..&tz=..` — `CronPreviewResponse` (`validateCron` +
+  `nextRuns`). Auth required.
+- `GET /api/schedules/[id]` — `ScheduleDetail` (include recent runs, newest first, cap
+  ~20). **404** if not owned.
+- `PATCH /api/schedules/[id]` — `ScheduleSummary` (edit-in-place). If
+  `cron`/`timezone`/`enabled` changed, recompute `nextRunAt` (`= null` when disabled).
+  Validate cron if provided.
+- `DELETE /api/schedules/[id]` — `{ success: true }`. **FIRST** null
+  `Conversation.scheduleId` for this schedule, **THEN** delete the schedule (runs cascade).
+  **404** if not owned.
+- `POST /api/schedules/[id]/run` — run now (manual). Returns the created
+  `ScheduleRunSummary` (**200**) or **404**.
+- `GET/POST /api/cron` — **public**, guarded by `CRON_SECRET`. Accept the secret via
+  `Authorization: Bearer <CRON_SECRET>` **or** `X-Cron-Secret: <CRON_SECRET>`.
+  `CRON_SECRET` unset → **503** `{ error }`; bad/missing secret → **401**. On success calls
+  `runDueSchedules({ wait: true })` and returns `CronTriggerResult` (`{ started, at }`).
+
+### Triggers & env
+Both an in-process 60s ticker (`SCHEDULER_ENABLED=1`, via instrumentation; needs a
+persistent Node server) and the `CRON_SECRET`-guarded `/api/cron` endpoint funnel into the
+**same** `runDueSchedules()`. The CAS claim above makes concurrent triggers safe.

@@ -22,6 +22,7 @@ model User {
   sessions      Session[]
   conversations Conversation[]
   mcpServers    McpServer[]
+  schedules     Schedule[]
 }
 
 // ---- NextAuth standard models ----
@@ -72,13 +73,19 @@ model Conversation {
   title     String   @default("New chat")
   userId    String
   model     String
+  // Set when this conversation was created by a scheduled-task run. Nulled (not
+  // cascaded) if the owning Schedule is deleted, so past run chats survive.
+  scheduleId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages Message[]
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedule  Schedule?  @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  messages  Message[]
+  artifacts Artifact[]
 
   @@index([userId])
+  @@index([scheduleId])
 }
 
 model Message {
@@ -90,11 +97,56 @@ model Message {
   toolCalls      String? // JSON-encoded tool call/result records
   reasoning      String? // Reasoning summary text (assistant messages only)
   reasoningMs    Int? // Time spent producing the reasoning summary, in ms
+  artifactRefs   String? // JSON-encoded ArtifactRef[] — artifacts this message created/updated
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+}
+
+// A Claude-Desktop-style Artifact: a substantial, self-contained, versioned
+// piece of content (code, document, HTML/SVG, Mermaid diagram, or interactive
+// React component) produced by the assistant via the artifact tools and rendered
+// in a side panel. Each Artifact belongs to one conversation and is targeted by
+// the model via a stable, conversation-unique `identifier`. Every edit appends a
+// new ArtifactVersion so the user can step through history.
+model Artifact {
+  id             String   @id @default(cuid())
+  conversationId String
+  // Model-provided stable slug, unique within the conversation. update/rewrite
+  // target an existing artifact by this identifier.
+  identifier     String
+  // ArtifactType: "code" | "markdown" | "html" | "svg" | "mermaid" | "react"
+  type           String
+  title          String
+  // Language hint for "code" artifacts (e.g. "python"); null for other types.
+  language       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  versions     ArtifactVersion[]
+
+  @@unique([conversationId, identifier])
+  @@index([conversationId])
+}
+
+// One immutable snapshot of an Artifact's content. `version` is 1-based and
+// increments on every create/update/rewrite. `messageId` links the version back
+// to the assistant message that produced it (used to render inline chips).
+model ArtifactVersion {
+  id         String   @id @default(cuid())
+  artifactId String
+  version    Int
+  content    String // Full content snapshot at this version
+  messageId  String? // Assistant message that produced this version
+  createdAt  DateTime @default(now())
+
+  artifact Artifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@unique([artifactId, version])
+  @@index([artifactId])
 }
 
 // A remote MCP (Model Context Protocol) server registered by a user, exposed in
@@ -132,4 +184,53 @@ model McpServer {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// A user-defined scheduled task (Claude-Desktop-style automation). At each fire
+// the scheduler seeds a NEW conversation with `prompt` and runs the agent as the
+// owning user; every attempt is logged as a ScheduleRun. `cron` (5-field) is the
+// source of truth, evaluated in `timezone` (IANA). `nextRunAt`/`lastRunAt` are in
+// UTC. `nextRunAt` doubles as the atomic claim token (compare-and-swap) so the
+// in-process ticker and the external /api/cron endpoint never double-fire a run.
+model Schedule {
+  id        String  @id @default(cuid())
+  userId    String
+  title     String
+  prompt    String // the task instruction, sent as the seed user message
+  model     String
+  effort    String  @default("medium") // ReasoningEffort
+  cron      String // 5-field cron expression (minute hour dom month dow)
+  timezone  String  @default("UTC") // IANA tz the cron is evaluated in
+  enabled   Boolean @default(true)
+
+  nextRunAt DateTime? // next fire time (UTC); also the CAS claim token
+  lastRunAt DateTime? // last time a run was claimed (UTC)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs          ScheduleRun[]
+  conversations Conversation[]
+
+  @@index([userId])
+  @@index([enabled, nextRunAt])
+}
+
+// One fire attempt of a Schedule. Run health is derived from this log, NOT from
+// Schedule.lastRunAt (which is claim-time and rolled forward before the agent
+// runs). `conversationId` links to the chat the run produced.
+model ScheduleRun {
+  id             String    @id @default(cuid())
+  scheduleId     String
+  status         String    @default("running") // "running" | "success" | "error"
+  trigger        String    @default("cron") // "cron" | "manual"
+  conversationId String? // conversation created for this run
+  error          String? // failure message when status = "error"
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
 }

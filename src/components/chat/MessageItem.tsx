@@ -8,6 +8,7 @@ import type {
   ChatMessage,
 } from "@/lib/types";
 import { Markdown } from "@/components/markdown/Markdown";
+import { ArtifactChip } from "@/components/artifacts/ArtifactChip";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { IconButton } from "@/components/ui/IconButton";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
@@ -185,6 +186,16 @@ export function MessageItem({
         ) : null}
         {showCaret && message.content && (
           <span className="ml-0.5 inline-block h-4 w-[3px] animate-pulse-cursor align-middle bg-text-primary" />
+        )}
+        {message.artifactRefs && message.artifactRefs.length > 0 && (
+          <div className="my-2 flex flex-col gap-2">
+            {message.artifactRefs.map((ref) => (
+              <ArtifactChip
+                key={ref.artifactId + ref.version}
+                artifactRef={ref}
+              />
+            ))}
+          </div>
         )}
         <div
           className={cn(

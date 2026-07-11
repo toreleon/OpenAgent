@@ -2,6 +2,7 @@ import type { Tool } from "@openai/agents";
 import { getCurrentTimeTool } from "./get-current-time";
 import { runJavascriptTool } from "./run-javascript";
 import { hostedWebSearchTool, fallbackWebSearchTool } from "./web-search";
+import { artifactTools } from "./artifacts";
 
 /**
  * The full set of tools available to the chat agent. Order is not significant;
@@ -18,6 +19,7 @@ export const agentTools: Tool[] = [
   fallbackWebSearchTool,
   runJavascriptTool,
   getCurrentTimeTool,
+  ...artifactTools,
 ];
 
 export {
@@ -25,4 +27,5 @@ export {
   runJavascriptTool,
   hostedWebSearchTool,
   fallbackWebSearchTool,
+  artifactTools,
 };

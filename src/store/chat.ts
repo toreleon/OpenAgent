@@ -2,6 +2,9 @@
 
 import { create } from "zustand";
 import type {
+  Artifact,
+  ArtifactRef,
+  ArtifactVersion,
   Attachment,
   ChatMessage,
   ConversationDetail,
@@ -48,6 +51,14 @@ export interface ChatState {
   /** Reasoning effort applied to the next turn (see REASONING_EFFORTS). */
   effort: ReasoningEffort;
 
+  // ---- artifacts ----
+  /** All artifacts in the current conversation, each with full version history. */
+  artifacts: Artifact[];
+  /** The artifact currently shown in the side panel, or null when closed. */
+  openArtifactId: string | null;
+  /** Selected version to display; null means "follow the latest version". */
+  openArtifactVersion: number | null;
+
   // ---- ui / status ----
   conversationsLoading: boolean;
   messagesLoading: boolean;
@@ -62,6 +73,12 @@ export interface ChatState {
   loadConversations: () => Promise<void>;
   loadConversation: (id: string) => Promise<void>;
   newChat: () => void;
+  /** Open an artifact in the side panel (optionally at a specific version). */
+  openArtifact: (artifactId: string, version?: number) => void;
+  /** Close the artifact side panel. */
+  closeArtifact: () => void;
+  /** Show a specific version of the open artifact (null = latest). */
+  setArtifactVersion: (version: number | null) => void;
   sendMessage: (
     text: string,
     attachments: Attachment[],
@@ -83,6 +100,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   model: DEFAULT_MODEL,
   effort: DEFAULT_EFFORT,
+
+  artifacts: [],
+  openArtifactId: null,
+  openArtifactVersion: null,
 
   conversationsLoading: false,
   messagesLoading: false,
@@ -112,7 +133,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   loadConversation: async (id) => {
     if (get().currentId === id && get().messages.length > 0) return;
-    set({ messagesLoading: true, currentId: id, messages: [] });
+    set({
+      messagesLoading: true,
+      currentId: id,
+      messages: [],
+      artifacts: [],
+      openArtifactId: null,
+      openArtifactVersion: null,
+    });
     try {
       const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       if (res.status === 404) {
@@ -125,6 +153,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         currentId: data.id,
         messages: data.messages,
         model: data.model || get().model,
+        artifacts: data.artifacts ?? [],
       });
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "Failed to load conversation" });
@@ -135,7 +164,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   newChat: () => {
     if (get().isStreaming) get().stop();
-    set({ currentId: null, messages: [], error: null });
+    set({
+      currentId: null,
+      messages: [],
+      error: null,
+      artifacts: [],
+      openArtifactId: null,
+      openArtifactVersion: null,
+    });
+  },
+
+  openArtifact: (artifactId, version) => {
+    set({
+      openArtifactId: artifactId,
+      openArtifactVersion: version ?? null,
+    });
+  },
+
+  closeArtifact: () => {
+    set({ openArtifactId: null, openArtifactVersion: null });
+  },
+
+  setArtifactVersion: (version) => {
+    set({ openArtifactVersion: version });
   },
 
   sendMessage: async (text, attachments, options) => {
@@ -406,6 +457,71 @@ function applyEvent(
           m.id === id ? { ...m, toolCalls: [...toolCalls] } : m,
         ),
       }));
+      break;
+    }
+    case "artifact": {
+      const id = assistantIdRef.current ?? assistantId;
+      const snap = event.artifact;
+      const version: ArtifactVersion = {
+        version: snap.version,
+        content: snap.content,
+        createdAt: snap.updatedAt,
+      };
+      const ref: ArtifactRef = {
+        artifactId: snap.id,
+        identifier: snap.identifier,
+        title: snap.title,
+        type: snap.type,
+        version: snap.version,
+        command: event.command,
+      };
+      set((s) => {
+        const idx = s.artifacts.findIndex((a) => a.id === snap.id);
+        let artifacts: Artifact[];
+        if (idx === -1) {
+          const created: Artifact = {
+            id: snap.id,
+            conversationId: s.currentId ?? "",
+            identifier: snap.identifier,
+            type: snap.type,
+            title: snap.title,
+            language: snap.language,
+            versions: [version],
+            createdAt: snap.createdAt,
+            updatedAt: snap.updatedAt,
+          };
+          artifacts = [...s.artifacts, created];
+        } else {
+          const prev = s.artifacts[idx];
+          const hasVersion = prev.versions.some((v) => v.version === snap.version);
+          const versions = (
+            hasVersion
+              ? prev.versions.map((v) => (v.version === snap.version ? version : v))
+              : [...prev.versions, version]
+          ).sort((a, b) => a.version - b.version);
+          const updated: Artifact = {
+            ...prev,
+            title: snap.title,
+            type: snap.type,
+            language: snap.language,
+            versions,
+            updatedAt: snap.updatedAt,
+          };
+          artifacts = s.artifacts.map((a, i) => (i === idx ? updated : a));
+        }
+        const messages = s.messages.map((m) =>
+          m.id === id
+            ? { ...m, artifactRefs: [...(m.artifactRefs ?? []), ref] }
+            : m,
+        );
+        // Auto-open the panel on the latest version, matching Claude Desktop.
+        return {
+          artifacts,
+          messages,
+          openArtifactId: snap.id,
+          openArtifactVersion: null,
+        };
+      });
       break;
     }
     case "title": {

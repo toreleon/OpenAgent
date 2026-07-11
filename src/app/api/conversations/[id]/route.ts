@@ -1,8 +1,10 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { loadConversationArtifacts } from "@/lib/artifacts";
 import {
   type ApiError,
+  type ArtifactRef,
   type Attachment,
   type ChatMessage,
   type ChatRole,
@@ -61,8 +63,11 @@ export async function GET(_req: Request, { params }: RouteParams) {
     content: m.content,
     attachments: decodeJsonArray<Attachment>(m.attachments),
     toolCalls: decodeJsonArray<ToolCallRecord>(m.toolCalls),
+    artifactRefs: decodeJsonArray<ArtifactRef>(m.artifactRefs),
     createdAt: m.createdAt.toISOString(),
   }));
+
+  const artifacts = await loadConversationArtifacts(prisma, conversation.id);
 
   const detail: ConversationDetail = {
     id: conversation.id,
@@ -71,6 +76,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
     messages,
+    artifacts,
   };
 
   return Response.json(detail);

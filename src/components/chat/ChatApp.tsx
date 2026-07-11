@@ -9,6 +9,7 @@ import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
 import { ModelPicker } from "./ModelPicker";
+import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { cn } from "@/components/ui/cn";
 
 export interface ChatAppProps {
@@ -27,6 +28,7 @@ export function ChatApp({ conversationId }: ChatAppProps) {
   const model = useChatStore((s) => s.model);
   const error = useChatStore((s) => s.error);
   const messagesLoading = useChatStore((s) => s.messagesLoading);
+  const openArtifactId = useChatStore((s) => s.openArtifactId);
 
   const setModel = useChatStore((s) => s.setModel);
   const sendMessage = useChatStore((s) => s.sendMessage);
@@ -120,6 +122,18 @@ export function ChatApp({ conversationId }: ChatAppProps) {
           onDraftConsumed={() => setDraft(undefined)}
         />
       </div>
+
+      {/* Artifact panel: side-by-side on md+, full-screen overlay on small screens. */}
+      {openArtifactId && (
+        <div className="hidden h-full w-[45%] min-w-[380px] max-w-[760px] shrink-0 border-l border-border/60 md:flex">
+          <ArtifactPanel />
+        </div>
+      )}
+      {openArtifactId && (
+        <div className="fixed inset-0 z-40 bg-main md:hidden">
+          <ArtifactPanel />
+        </div>
+      )}
     </div>
   );
 }

@@ -3,11 +3,17 @@ import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
 import { streamChat } from "@/lib/agent";
 import {
+  applyArtifactCommand,
+  toolNameToArtifactCommand,
+} from "@/lib/artifacts";
+import {
   MODELS,
   DEFAULT_MODEL,
   REASONING_EFFORTS,
   DEFAULT_EFFORT,
+  isArtifactToolName,
   type ApiError,
+  type ArtifactRef,
   type Attachment,
   type ChatMessage,
   type ChatRequest,
@@ -192,6 +198,7 @@ export async function POST(req: Request) {
       let reasoning = "";
       let reasoningMs: number | null = null;
       const toolCalls: ToolCallRecord[] = [];
+      const artifactRefs: ArtifactRef[] = [];
       let toolSeq = 0;
       let sawError = false;
 
@@ -231,7 +238,35 @@ export async function POST(req: Request) {
               assembled += event.text;
               send(event);
               break;
-            case "tool_call":
+            case "tool_call": {
+              // Artifact tool calls are intercepted here: instead of surfacing a
+              // generic "tool" card, we persist the artifact + version and emit a
+              // dedicated `artifact` event that drives the side panel. The model
+              // still receives the tool's own ack as its function result.
+              const command = toolNameToArtifactCommand(event.name);
+              if (command) {
+                try {
+                  const result = await applyArtifactCommand(prisma, {
+                    conversationId,
+                    messageId: assistantMessageId,
+                    command,
+                    args: event.args,
+                  });
+                  if (result.ok) {
+                    artifactRefs.push(result.ref);
+                    send({
+                      type: "artifact",
+                      command,
+                      artifact: result.snapshot,
+                    });
+                  } else {
+                    console.error("[chat] artifact command failed:", result.error);
+                  }
+                } catch (err) {
+                  console.error("[chat] artifact persistence error:", err);
+                }
+                break;
+              }
               toolCalls.push({
                 id: `tool_${toolSeq++}`,
                 name: event.name,
@@ -239,7 +274,10 @@ export async function POST(req: Request) {
               });
               send(event);
               break;
+            }
             case "tool_result": {
+              // Artifact tools have no visible "tool" card, so skip their results.
+              if (isArtifactToolName(event.name)) break;
               // Attach output to the most recent matching call record.
               for (let i = toolCalls.length - 1; i >= 0; i--) {
                 if (
@@ -271,6 +309,7 @@ export async function POST(req: Request) {
             toolCalls: encodeJsonArray(toolCalls),
             reasoning: reasoning.length > 0 ? reasoning : null,
             reasoningMs,
+            artifactRefs: encodeJsonArray(artifactRefs),
           },
         });
 
@@ -303,6 +342,7 @@ export async function POST(req: Request) {
               toolCalls: encodeJsonArray(toolCalls),
               reasoning: reasoning.length > 0 ? reasoning : null,
               reasoningMs,
+              artifactRefs: encodeJsonArray(artifactRefs),
             },
           });
           await prisma.conversation.update({

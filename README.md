@@ -109,6 +109,8 @@ cp .env.example .env
 | `DATABASE_URL`    | yes      | Prisma datasource. Default `file:./dev.db` (SQLite).                                                      |
 | `GITHUB_ID`       | no       | GitHub OAuth client id (enables the GitHub sign-in button).                                              |
 | `GITHUB_SECRET`   | no       | GitHub OAuth client secret.                                                                              |
+| `SCHEDULER_ENABLED` | no     | Set to `1` to start the in-process 60s ticker (needs a persistent Node server; leave blank on serverless). See **Scheduled tasks**. |
+| `CRON_SECRET`     | no       | Shared secret that guards `POST/GET /api/cron` for external schedulers. Unset = the cron endpoint returns `503`. |
 
 ### 3. Create the database
 
@@ -237,6 +239,52 @@ DTO/token layer is `src/lib/mcp/index.ts`. The OAuth `state` maps the callback b
   rows you don't own.
 - **Trust is an explicit toggle.** A connector's tools are only loaded once you mark it trusted; this
   is a coarse per-connector toggle, not a per-call approval prompt (see notes).
+
+---
+
+## Scheduled tasks
+
+Claude-Desktop-style **automations**: save a prompt + a cron schedule, and the app fires it on its own
+cadence. Each fire seeds a **brand-new conversation** (seeded with the schedule's prompt as the first
+user message), runs the agent as the owning user, and persists the assistant reply — so every run is a
+self-contained thread you can open later, linked back via `Conversation.scheduleId`. Every fire attempt
+is recorded as a `ScheduleRun` row (`running → success | error`). Manage schedules in the UI at
+**`/schedules`**.
+
+### Cron & timezone model
+
+A schedule stores a standard **5-field cron** expression (`min hour day month weekday`) plus an **IANA
+timezone** (e.g. `America/New_York`, default `UTC`). The next fire time is computed strictly in that
+timezone, so a "9am daily" job stays at 9am local across DST. Validation, human-readable descriptions,
+and the next-run preview live in `src/lib/schedule/cron.ts`; the `/schedules` UI builds expressions from
+presets (hourly / daily / weekdays / weekly / monthly / custom) via `src/lib/schedule/presets.ts`.
+
+### Enabling the triggers
+
+Two independent triggers funnel into the **same** `runDueSchedules()` runner; enable either or both.
+
+- **In-process ticker** — set `SCHEDULER_ENABLED=1`. A Next.js instrumentation hook starts a 60s
+  `setInterval` (plus one warm-up tick shortly after boot) that claims and fires any due schedules.
+  This needs a **long-lived Node process** (`npm run dev` / `npm run start`); leave it blank on
+  serverless, where the process is not persistent.
+
+- **`/api/cron` endpoint** — set `CRON_SECRET` and have an external scheduler hit the route. It is
+  guarded by the secret (unset → `503`; bad/missing secret → `401`) sent as either
+  `Authorization: Bearer <secret>` or `X-Cron-Secret: <secret>`, and runs due schedules to completion
+  before responding (safe for serverless). Both `GET` and `POST` work.
+
+  ```bash
+  curl -X POST -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
+  ```
+
+  A crontab entry that ticks every minute:
+
+  ```cron
+  * * * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://your-app.example.com/api/cron
+  ```
+
+Double-firing is prevented regardless of how many triggers run: each schedule is claimed with an atomic
+compare-and-swap on its `nextRunAt` before it runs, so only one caller ever wins a given fire.
 
 ---
 
