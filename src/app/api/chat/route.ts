@@ -29,7 +29,9 @@ import {
   type ResearchState,
   type StreamEvent,
   type ToolCallRecord,
+  type TraceItem,
 } from "@/lib/types";
+import { extractToolArg } from "@/lib/toolActivity";
 
 export const runtime = "nodejs";
 
@@ -54,6 +56,18 @@ function decodeJsonArray<T>(value: string | null): T[] | undefined {
 function encodeJsonArray(value: unknown[] | undefined): string | null {
   if (!value || value.length === 0) return null;
   return JSON.stringify(value);
+}
+
+/**
+ * Before persisting, mark any tool row still "running" as "error": the stream
+ * ended (via failure, or an error event that skipped the tool's result) without
+ * that tool completing, so it should rehydrate as failed rather than a spinner
+ * that never resolves on reload.
+ */
+function finalizeTimeline(timeline: TraceItem[]): void {
+  for (const it of timeline) {
+    if (it.type === "tool" && it.status === "running") it.status = "error";
+  }
 }
 
 /** Decode the JSON-string `research` column into ResearchState, tolerating bad data. */
@@ -253,9 +267,16 @@ export async function POST(req: Request) {
       let reasoning = "";
       let reasoningMs: number | null = null;
       const toolCalls: ToolCallRecord[] = [];
+      // Ordered interleaved thinking trace (reasoning segments + tool rows),
+      // persisted as `timeline` so it rehydrates in original order after reload.
+      const timeline: TraceItem[] = [];
       const artifactRefs: ArtifactRef[] = [];
       let toolSeq = 0;
       let sawError = false;
+      // True once an artifact command was ATTEMPTED (even if it failed), so the
+      // empty-reply retry doesn't misread a failed artifact turn as "nothing
+      // happened" and re-run (which would just re-attempt the failing artifact).
+      let artifactAttempted = false;
       // JSON-encoded ResearchState for Deep Research turns; null for normal chat.
       let researchColumn: string | null = null;
 
@@ -391,6 +412,11 @@ export async function POST(req: Request) {
             brief: message,
           } satisfies ResearchState);
         } else {
+        // Consume one streamChat run into the accumulators. Factored out so we
+        // can re-run it once if the first attempt produces nothing (see below).
+        // `suppressReasoning` hides the retry's Thinking events so the user
+        // doesn't see a second, doubled reasoning block.
+        const consumeChat = async (suppressReasoning: boolean) => {
         for await (const event of streamChat({
           model: conversationModel,
           conversationId,
@@ -401,18 +427,34 @@ export async function POST(req: Request) {
           projectContext,
         })) {
           switch (event.type) {
-            case "reasoning_delta":
+            case "reasoning_delta": {
+              if (suppressReasoning) break;
               reasoning += event.text;
-              send(event);
-              break;
-            case "reasoning_done":
-              // Record the thinking duration once, when reasoning settles.
-              if (reasoningMs === null) {
-                reasoningMs = Date.now() - startedAt;
+              // Append to the open reasoning segment, or start a new one after a
+              // tool row — preserving think → act → think order in the timeline.
+              const last = timeline[timeline.length - 1];
+              if (last && last.type === "reasoning") {
+                last.text += event.text;
+              } else {
+                timeline.push({ type: "reasoning", text: event.text });
               }
               send(event);
               break;
+            }
+            case "reasoning_done":
+              // Forwarded for the client, but NOT used to freeze the duration:
+              // it fires after the first reasoning segment, which on interleaved
+              // think→tool→think turns lands well before the answer. Freeze at
+              // the first answer `delta` instead so tool time is included.
+              if (suppressReasoning) break;
+              send(event);
+              break;
             case "delta":
+              // The answer has started: the thinking phase is over. Freeze the
+              // total thinking duration (reasoning + any tool time) once.
+              if (reasoningMs === null && (reasoning.length > 0 || timeline.length > 0)) {
+                reasoningMs = Date.now() - startedAt;
+              }
               assembled += event.text;
               send(event);
               break;
@@ -423,6 +465,7 @@ export async function POST(req: Request) {
               // still receives the tool's own ack as its function result.
               const command = toolNameToArtifactCommand(event.name);
               if (command) {
+                artifactAttempted = true;
                 try {
                   const result = await applyArtifactCommand(prisma, {
                     conversationId,
@@ -445,10 +488,18 @@ export async function POST(req: Request) {
                 }
                 break;
               }
+              const recordId = `tool_${toolSeq++}`;
               toolCalls.push({
-                id: `tool_${toolSeq++}`,
+                id: recordId,
                 name: event.name,
                 args: event.args,
+              });
+              timeline.push({
+                type: "tool",
+                id: recordId,
+                tool: event.name,
+                arg: extractToolArg(event.name, event.args),
+                status: "running",
               });
               send(event);
               break;
@@ -466,6 +517,14 @@ export async function POST(req: Request) {
                   break;
                 }
               }
+              // Flip the matching running tool row in the timeline to done.
+              for (let i = timeline.length - 1; i >= 0; i--) {
+                const it = timeline[i];
+                if (it.type === "tool" && it.tool === event.name && it.status === "running") {
+                  it.status = "done";
+                  break;
+                }
+              }
               send(event);
               break;
             }
@@ -478,14 +537,40 @@ export async function POST(req: Request) {
               break;
           }
         }
+        };
+
+        // First attempt at the reply. If it produced literally nothing — no
+        // answer text, no tool call, no artifact — and didn't error, the model
+        // returned only a reasoning summary (an occasional reasoning-model quirk);
+        // re-run ONCE (bounded) so the user gets a real answer, not a blank turn.
+        await consumeChat(false);
+        if (
+          !sawError &&
+          assembled.trim() === "" &&
+          toolCalls.length === 0 &&
+          artifactRefs.length === 0 &&
+          !artifactAttempted
+        ) {
+          // Attempt 1 produced nothing meaningful; drop any stray whitespace it
+          // streamed so the retry's answer is the sole persisted content.
+          assembled = "";
+          await consumeChat(true);
+        }
+        // Fallback: a turn that thought (reasoning and/or tools) but never
+        // produced an answer delta still needs a frozen thinking duration.
+        if (reasoningMs === null && (reasoning.length > 0 || timeline.length > 0)) {
+          reasoningMs = Date.now() - startedAt;
+        }
         }
 
         // ---- Persist final assistant message + bump conversation ----
+        finalizeTimeline(timeline);
         await prisma.message.update({
           where: { id: assistantMessageId },
           data: {
             content: assembled,
             toolCalls: encodeJsonArray(toolCalls),
+            timeline: encodeJsonArray(timeline),
             reasoning: reasoning.length > 0 ? reasoning : null,
             reasoningMs,
             artifactRefs: encodeJsonArray(artifactRefs),
@@ -513,13 +598,17 @@ export async function POST(req: Request) {
           send({ type: "done" });
         }
       } catch (err) {
-        // 6) error then close. Still try to persist whatever we assembled.
+        // 6) error then close. Still try to persist whatever we assembled —
+        // including the interleaved timeline (finalized so a tool that was
+        // mid-flight when the run threw rehydrates as errored, not spinning).
         try {
+          finalizeTimeline(timeline);
           await prisma.message.update({
             where: { id: assistantMessageId },
             data: {
               content: assembled,
               toolCalls: encodeJsonArray(toolCalls),
+              timeline: encodeJsonArray(timeline),
               reasoning: reasoning.length > 0 ? reasoning : null,
               reasoningMs,
               artifactRefs: encodeJsonArray(artifactRefs),

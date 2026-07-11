@@ -13,6 +13,7 @@ import {
   type ConversationSummary,
   type ResearchState,
   type ToolCallRecord,
+  type TraceItem,
   type UpdateConversationRequest,
 } from "@/lib/types";
 
@@ -76,6 +77,11 @@ export async function GET(_req: Request, { params }: RouteParams) {
     content: m.content,
     attachments: decodeJsonArray<Attachment>(m.attachments),
     toolCalls: decodeJsonArray<ToolCallRecord>(m.toolCalls),
+    // Re-hydrate the Thinking trace so it survives a reload: the reasoning
+    // summary, its frozen duration, and the ordered interleaved timeline.
+    reasoning: m.reasoning ?? undefined,
+    reasoningMs: m.reasoningMs ?? undefined,
+    timeline: decodeJsonArray<TraceItem>(m.timeline),
     artifactRefs: decodeJsonArray<ArtifactRef>(m.artifactRefs),
     research: decodeResearch(m.research),
     createdAt: m.createdAt.toISOString(),

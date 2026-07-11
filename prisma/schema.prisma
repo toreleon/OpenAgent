@@ -105,7 +105,8 @@ model Message {
   attachments    String? // JSON-encoded Attachment[]
   toolCalls      String? // JSON-encoded tool call/result records
   reasoning      String? // Reasoning summary text (assistant messages only)
-  reasoningMs    Int? // Time spent producing the reasoning summary, in ms
+  reasoningMs    Int? // Total thinking wall-clock (reasoning + tools), in ms
+  timeline       String? // JSON-encoded TraceItem[] — ordered interleaved reasoning + tool activity
   artifactRefs   String? // JSON-encoded ArtifactRef[] — artifacts this message created/updated
   research       String? // JSON-encoded ResearchState — Deep Research plan + activity log
   createdAt      DateTime @default(now())

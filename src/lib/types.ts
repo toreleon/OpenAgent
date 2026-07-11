@@ -34,6 +34,33 @@ export interface ToolCallRecord {
   output?: unknown;
 }
 
+/**
+ * One item in an assistant turn's ordered "thinking" timeline — the interleaved,
+ * chronological record of reasoning summaries and tool activity that ChatGPT
+ * shows above the answer (and collapses to "Thought for Ns"). The `seq`-ordered
+ * array is the canonical, reload-safe shape: a reasoning chunk produced AFTER a
+ * tool call carries a later position and renders after that tool's row, so
+ * think→act→think interleaving survives persistence. Kept deliberately lean
+ * (a single summarized `arg`, never raw args/output) so it never bloats the row.
+ */
+export type TraceItem =
+  | {
+      type: "reasoning";
+      /** Accumulated reasoning summary markdown for this segment. */
+      text: string;
+    }
+  | {
+      type: "tool";
+      /** Stable id (pairs a running tool row to its completion). */
+      id: string;
+      /** Internal tool name (e.g. "web_search"); never rendered to the user. */
+      tool: string;
+      /** One summarized argument (query, hostname, or file basename); may be absent. */
+      arg?: string;
+      /** Lifecycle of the call. `running` until its result arrives. */
+      status: "running" | "done" | "error";
+    };
+
 /** A single chat message as used on the client and serialized over the API. */
 export interface ChatMessage {
   id: string;
@@ -47,8 +74,21 @@ export interface ChatMessage {
    * survives reloads. Absent when the model produced no reasoning summary.
    */
   reasoning?: string;
-  /** How long the model spent producing the reasoning summary, in milliseconds. */
+  /**
+   * Total "thinking" wall-clock in milliseconds — reasoning plus any tool time,
+   * frozen when the final answer starts. Drives the collapsed "Thought for Ns" /
+   * "Worked for Ns" pill. (Historically named for reasoning only; it now spans
+   * the whole pre-answer phase.)
+   */
   reasoningMs?: number;
+  /**
+   * The ordered, interleaved thinking timeline (reasoning segments + tool
+   * activity) rendered in the collapsible trace above the answer. Present on
+   * assistant messages that reasoned and/or used tools. When absent on a legacy
+   * message, the UI synthesizes a best-effort timeline from `reasoning` +
+   * `toolCalls`. See {@link TraceItem}.
+   */
+  timeline?: TraceItem[];
   /**
    * Artifacts this (assistant) message created or updated, in call order. Used
    * to render inline "artifact chips" that open the artifact panel. Absent when

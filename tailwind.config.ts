@@ -34,10 +34,17 @@ const config: Config = {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0" },
         },
+        // Left-to-right light sweep over the live "Thinking…" label (a clipped
+        // gradient panned across the text). See ThinkingBlock / globals.css.
+        shimmer: {
+          "0%": { backgroundPosition: "200% 0" },
+          "100%": { backgroundPosition: "-200% 0" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.2s ease-out",
         "pulse-cursor": "pulse-cursor 1s steps(1) infinite",
+        shimmer: "shimmer 1.8s linear infinite",
       },
     },
   },

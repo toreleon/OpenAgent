@@ -405,11 +405,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (e) {
       const aborted =
         e instanceof DOMException && e.name === "AbortError";
+      // Whether the user hit Stop or the request failed, end the thinking phase
+      // (collapse the pill) and mark any still-spinning tool row as errored — so
+      // the turn never stays stuck on a live, non-collapsible "Thinking…".
+      const id = assistantIdRef.current ?? assistantId;
+      failRunningTools(timeline);
+      finishThinking(id, timeline, set);
       if (!aborted) {
         const message = e instanceof Error ? e.message : "Something went wrong";
         set((s) => ({
           error: message,
-          messages: appendErrorToAssistant(s.messages, assistantId, message),
+          messages: appendErrorToAssistant(s.messages, id, message),
         }));
       }
     } finally {
@@ -543,7 +549,10 @@ function applyEvent(
             ? ({
                 ...m,
                 reasoning: (m.reasoning ?? "") + event.text,
-                reasoningStreaming: true,
+                // Never re-open the live trace once the thinking phase has ended
+                // (a late reasoning chunk after the answer started must not
+                // resurrect the shimmer — it could then never be re-closed).
+                reasoningStreaming: !reasoningDoneRef.current,
                 timeline: snapshot,
               } as StreamingChatMessage)
             : m,
@@ -597,7 +606,9 @@ function applyEvent(
             ? ({
                 ...m,
                 toolCalls: [...toolCalls],
-                reasoningStreaming: true,
+                // Don't resurrect the live trace if the answer already began
+                // (see the reasoning_delta guard) — keeps the one-way finish.
+                reasoningStreaming: !reasoningDoneRef.current,
                 timeline: snapshot,
               } as StreamingChatMessage)
             : m,
@@ -751,6 +762,11 @@ function applyEvent(
     }
     case "error": {
       const id = assistantIdRef.current ?? assistantId;
+      // The turn failed mid-flight: any tool row still spinning is now stuck, so
+      // mark it errored, and end the thinking phase so the trace collapses to a
+      // static pill instead of a permanently shimmering "Thinking…".
+      failRunningTools(timeline);
+      finishThinking(id, timeline, set);
       set((s) => ({
         error: event.message,
         messages: appendErrorToAssistant(s.messages, id, event.message),
@@ -817,6 +833,35 @@ function finishReasoning(id: string, set: SetState) {
           } as StreamingChatMessage)
         : m,
     ),
+  }));
+}
+
+/**
+ * Mark every still-"running" tool row in the (mutable) timeline as errored.
+ * Called when a turn is interrupted (Stop) or fails before a tool's result
+ * arrives, so the row shows a failure glyph instead of a spinner that would
+ * otherwise persist forever after a reload.
+ */
+function failRunningTools(timeline: TraceItem[]) {
+  for (let i = 0; i < timeline.length; i++) {
+    const it = timeline[i];
+    if (it.type === "tool" && it.status === "running") {
+      timeline[i] = { ...it, status: "error" };
+    }
+  }
+}
+
+/**
+ * End the thinking phase: collapse the trace (finishReasoning) and flush the
+ * latest timeline snapshot to the message so any status changes (e.g. a tool
+ * flipped to "error") are reflected. Safe to call after finishReasoning already
+ * ran — it still re-writes the timeline.
+ */
+function finishThinking(id: string, timeline: TraceItem[], set: SetState) {
+  finishReasoning(id, set);
+  const snapshot = [...timeline];
+  set((s) => ({
+    messages: s.messages.map((m) => (m.id === id ? { ...m, timeline: snapshot } : m)),
   }));
 }
 

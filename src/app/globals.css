@@ -63,6 +63,24 @@ body {
   background-color: rgb(var(--color-text-secondary));
 }
 
+/*
+ * Live "Thinking…" shimmer. The gradient is defined inline on the element; this
+ * only carries the reduced-motion fallback so the label degrades to plain muted
+ * text (no sweep, no clipped-gradient transparency) when motion is reduced.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none !important;
+    background-image: none !important;
+    /* Beat the inline `-webkit-text-fill-color: transparent` / bg-clip:text the
+     * live label sets, so the text paints as plain muted color (not invisible). */
+    -webkit-background-clip: border-box !important;
+    background-clip: border-box !important;
+    color: rgb(var(--color-text-secondary)) !important;
+    -webkit-text-fill-color: rgb(var(--color-text-secondary)) !important;
+  }
+}
+
 /* Base typography for rendered markdown */
 .prose-chat {
   line-height: 1.75;

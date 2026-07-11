@@ -38,10 +38,9 @@ export function MessageList({
         <div className="mx-auto w-full max-w-chat px-4 pb-10 pt-6">
           {messages.map((m) => {
             const isStreamingThis = m.id === streamingMessageId && isStreaming;
-            const canRegenerate =
-              m.role === "assistant" &&
-              m.id === lastAssistantId &&
-              !isStreaming;
+            const isLastAssistant =
+              m.role === "assistant" && m.id === lastAssistantId;
+            const canRegenerate = isLastAssistant && !isStreaming;
             return (
               <MessageItem
                 key={m.id}
@@ -49,6 +48,7 @@ export function MessageList({
                 isStreaming={isStreamingThis}
                 canRegenerate={canRegenerate}
                 onRegenerate={onRegenerate}
+                isLast={isLastAssistant}
               />
             );
           })}
