@@ -22,6 +22,7 @@ It runs against the public OpenAI API **or** any OpenAI-compatible endpoint (e.g
 - **Reasoning / "Thinking" UI** — streams the model's reasoning summary into a collapsible panel and persists it across reloads.
 - **Built-in tools** — hosted web search (with a dependency-free DuckDuckGo fallback), `run_javascript`, and `get_current_time`.
 - **File & image uploads** — drag-and-drop attachments surfaced to vision-capable models as `input_image` / `input_file`.
+- **Deep Research** — a composer toggle that runs a ChatGPT-style research flow: the agent asks clarifying questions, then plans ~4 subtopics, runs ~12 `web_search`/`web_fetch` reads, and streams a **cited report inline** in the chat message beneath a live "Research" activity panel.
 - **MCP Connectors** — register remote Streamable-HTTP MCP servers (ChatGPT-style) with **full OAuth 2.1**: metadata discovery, dynamic client registration, PKCE, callback, and automatic token refresh. Server secrets/tokens never leave the server.
 - **OpenAI / Azure-compatible** — point at OpenAI or any compatible endpoint with `OPENAI_BASE_URL` + `OPENAI_MODEL`.
 - **Tailwind dark theme**, Markdown + KaTeX + syntax highlighting, Zustand stores, SQLite via Prisma.
@@ -241,6 +242,50 @@ See the **Web tools** block in `.env.example` for every knob, including `web_fet
 - **Untrusted content.** Fetched page text is treated as **data, not instructions**: `web_fetch` wraps
   it in a `<web_content untrusted="true">…</web_content>` envelope and its tool description tells the
   model to ignore any instructions found inside — a basic guard against prompt injection from web pages.
+
+---
+
+## Deep Research
+
+A composer **Deep Research** toggle turns a normal chat turn into a ChatGPT-style research run: the
+agent scopes the request, gathers sources from the live web, and streams a **cited report inline in the
+chat message** (not a side panel) beneath a collapsible **Research** activity panel that shows the plan
+and each live search/source as it happens.
+
+### Clarify → answer → report
+
+Deep Research is **two-phase**, mirroring ChatGPT:
+
+1. **Clarify.** On the first Deep-Research turn the agent replies with **2–3 concise clarifying
+   questions** (a short numbered list, streamed as a normal assistant message) to pin down scope,
+   audience, and constraints.
+2. **Research + report.** On the next turn — the user's answers — the agent runs the full pipeline: it
+   emits a **plan** (title + ~4 subtopics, each with search queries), fires the searches and page reads,
+   then streams the final **report** as ordinary `delta` events so it renders as the assistant message's
+   content, with inline source citations.
+
+### What a run does
+
+Depth is fixed at **"Standard"** (no depth picker): roughly **4 subtopics × 3 sources ≈ 12 total page
+reads**. The orchestrator plans the subtopics, calls the built-in **`web_search`** tool per query, reads
+the most relevant hits with **`web_fetch`**, analyzes each source, then synthesizes the cited report.
+Every step surfaces in the live activity panel as a `research_activity` event
+(`search` / `source` / `analyze` / `synthesize`, each transitioning `active → done | failed`).
+
+### Reuses the existing plumbing
+
+Deep Research adds **no new transport or network primitives** — it rides the same rails as normal chat:
+
+- **Same SSE stream.** The plan and activity updates travel as two new `StreamEvent` variants
+  (`research_plan`, `research_activity`); the report streams as the usual `reasoning_*` + `delta` events.
+  The final `ResearchState` persists on the assistant `Message.research` JSON column so the activity
+  panel and report survive reloads.
+- **Same web tools + SSRF guard.** All fetches go through `web_search` / `web_fetch`, so every request is
+  SSRF-guarded (`src/lib/net/safe-fetch.ts`) and fetched page text stays wrapped as **untrusted data** —
+  the analysis prompts treat it as content, never instructions.
+
+See **§11** of `CONTRACTS.md` for the wire contract: the request flag, the new stream events and state
+types, the two-phase route logic, and the orchestrator/agent APIs.
 
 ---
 

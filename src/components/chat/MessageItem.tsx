@@ -10,6 +10,7 @@ import type {
 import { Markdown } from "@/components/markdown/Markdown";
 import { ArtifactChip } from "@/components/artifacts/ArtifactChip";
 import { ThinkingBlock } from "./ThinkingBlock";
+import { ResearchActivity } from "./ResearchActivity";
 import { IconButton } from "@/components/ui/IconButton";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/components/ui/cn";
@@ -176,6 +177,12 @@ export function MessageItem({
           reasoningStreaming={reasoningStreaming}
           reasoningMs={message.reasoningMs}
         />
+        {message.research && (
+          <ResearchActivity
+            research={message.research}
+            isStreaming={isStreaming}
+          />
+        )}
         <ToolCalls toolCalls={toolCalls} />
         {message.content ? (
           <Markdown content={message.content} />

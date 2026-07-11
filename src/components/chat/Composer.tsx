@@ -7,6 +7,8 @@ import type { Attachment, ComposerProps } from "@/lib/types";
 import FileUpload from "@/components/upload/FileUpload";
 import { ModelPicker } from "./ModelPicker";
 import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
+import { DeepResearchToggle } from "./DeepResearchToggle";
+import { useChatStore } from "@/store/chat";
 import { cn } from "@/components/ui/cn";
 
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -40,6 +42,10 @@ export function Composer({
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const deepResearch = useChatStore((s) => s.deepResearch);
+  const effectivePlaceholder = deepResearch
+    ? "Ask a research question…"
+    : placeholder;
 
   // Adopt an external draft (suggestion card click).
   useEffect(() => {
@@ -165,7 +171,7 @@ export function Composer({
               onKeyDown={onKeyDown}
               rows={1}
               disabled={disabled}
-              placeholder={placeholder}
+              placeholder={effectivePlaceholder}
               className="max-h-[200px] flex-1 resize-none bg-transparent py-2 text-text-primary placeholder:text-text-secondary focus:outline-none disabled:cursor-not-allowed"
             />
 
@@ -193,7 +199,7 @@ export function Composer({
 
           {/* Footer row: model picker + reasoning effort */}
           <div className="flex items-center justify-between px-2.5 pb-1.5">
-            <div className="flex items-center gap-0.5">
+            <div className="flex flex-wrap items-center gap-0.5">
               <ModelPicker
                 value={model}
                 onChange={onModelChange}
@@ -202,6 +208,7 @@ export function Composer({
                 align="start"
               />
               <ReasoningEffortPicker disabled={isStreaming} side="top" align="start" />
+              <DeepResearchToggle disabled={isStreaming} />
             </div>
           </div>
         </div>
