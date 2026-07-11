@@ -514,7 +514,13 @@ function applyEvent(
             ? { ...m, artifactRefs: [...(m.artifactRefs ?? []), ref] }
             : m,
         );
-        // Auto-open the panel on the latest version, matching Claude Desktop.
+        // Media and diagram artifacts are immediately useful inline, so avoid
+        // interrupting the chat by opening the side panel for them.
+        if (snap.type === "svg" || snap.type === "mermaid" || snap.type === "image") {
+          return { artifacts, messages };
+        }
+
+        // Other artifacts still open on their latest version after creation.
         return {
           artifacts,
           messages,

@@ -92,8 +92,8 @@ export function buildSvgSrcDoc(content: string): string {
     <meta charset="utf-8" />
     <style>
       html, body { margin: 0; height: 100%; }
-      body { display: grid; place-items: center; background: #ffffff; padding: 16px; box-sizing: border-box; }
-      svg { max-width: 100%; max-height: calc(100vh - 32px); height: auto; }
+      body { display: grid; place-items: center; background: transparent; padding: 16px; box-sizing: border-box; }
+      svg { width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
     </style>
   </head>
   <body>${content}</body>
@@ -111,9 +111,10 @@ export function buildMermaidSrcDoc(content: string): string {
   <head>
     <meta charset="utf-8" />
     <style>
-      html, body { margin: 0; min-height: 100%; }
-      body { display: grid; place-items: center; background: #ffffff; padding: 16px; box-sizing: border-box; font-family: ui-sans-serif, system-ui, sans-serif; }
-      .mermaid { max-width: 100%; }
+      html, body { margin: 0; height: 100%; }
+      body { display: grid; place-items: center; background: transparent; padding: 16px; box-sizing: border-box; font-family: ui-sans-serif, system-ui, sans-serif; }
+      .mermaid { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; margin: 0; }
+      .mermaid svg { width: 100% !important; height: 100% !important; max-width: 100%; max-height: 100%; }
       #err { color: #b00020; white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; }
     </style>
   </head>

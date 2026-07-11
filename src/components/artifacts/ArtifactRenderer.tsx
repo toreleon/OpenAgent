@@ -5,6 +5,7 @@ import { CodeArtifact } from "./renderers/CodeArtifact";
 import { MarkdownArtifact } from "./renderers/MarkdownArtifact";
 import { HtmlArtifact } from "./renderers/HtmlArtifact";
 import { SvgArtifact } from "./renderers/SvgArtifact";
+import { ImageArtifact } from "./renderers/ImageArtifact";
 import { MermaidArtifact } from "./renderers/MermaidArtifact";
 import { ReactArtifact } from "./renderers/ReactArtifact";
 
@@ -37,6 +38,8 @@ function codeLanguageFor(artifact: Artifact): string | undefined {
       return "xml";
     case "svg":
       return "xml";
+    case "image":
+      return undefined;
     case "mermaid":
       return "mermaid";
     case "markdown":
@@ -80,6 +83,8 @@ function renderPreview(
       return <HtmlArtifact content={content} />;
     case "svg":
       return <SvgArtifact content={content} />;
+    case "image":
+      return <ImageArtifact content={content} />;
     case "mermaid":
       return <MermaidArtifact content={content} />;
     case "react":

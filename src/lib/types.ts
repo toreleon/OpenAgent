@@ -325,6 +325,7 @@ export interface McpConnectResponse {
  * - "markdown" — rendered as Markdown (Preview) or raw (Code)
  * - "html"     — a full HTML document rendered in a sandboxed iframe
  * - "svg"      — an SVG image rendered in a sandboxed iframe
+ * - "image"    — an image URL or data URL rendered directly
  * - "mermaid"  — a Mermaid diagram rendered in a sandboxed iframe (CDN)
  * - "react"    — an interactive React component rendered in a sandboxed iframe
  *                (Babel-standalone + esm.sh import map)
@@ -334,6 +335,7 @@ export type ArtifactType =
   | "markdown"
   | "html"
   | "svg"
+  | "image"
   | "mermaid"
   | "react";
 
@@ -343,6 +345,7 @@ export const ARTIFACT_TYPES: ArtifactType[] = [
   "markdown",
   "html",
   "svg",
+  "image",
   "mermaid",
   "react",
 ];
@@ -400,6 +403,12 @@ export interface Artifact {
   createdAt: string;
   /** ISO 8601 timestamp of the latest version. */
   updatedAt: string;
+}
+
+/** An artifact shown in the user's cross-conversation artifact library. */
+export interface ArtifactLibraryItem extends Artifact {
+  /** Title of the conversation that owns this artifact. */
+  conversationTitle: string;
 }
 
 /**

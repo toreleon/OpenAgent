@@ -31,6 +31,7 @@ const TYPE_ICONS: Record<ArtifactType, LucideIcon> = {
   markdown: FileText,
   html: Code,
   svg: ImageIcon,
+  image: ImageIcon,
   mermaid: GitBranch,
   react: Boxes,
 };
@@ -67,6 +68,8 @@ function extensionFor(artifact: Artifact): string {
       return ".html";
     case "svg":
       return ".svg";
+    case "image":
+      return ".png";
     case "mermaid":
       return ".mmd";
     case "react":
@@ -153,7 +156,7 @@ export function ArtifactPanel() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-main text-text-primary">
+    <div className="flex h-full w-full flex-col bg-main text-text-primary">
       {/* Header: type icon + title + identifier, view toggle, close */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
         <TypeIcon size={16} className="shrink-0 text-text-secondary" />

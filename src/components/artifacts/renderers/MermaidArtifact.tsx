@@ -11,7 +11,7 @@ export interface MermaidArtifactProps {
 
 export function MermaidArtifact({ content }: MermaidArtifactProps) {
   return (
-    <SandboxFrame srcDoc={buildMermaidSrcDoc(content)} title="Mermaid diagram" />
+    <SandboxFrame srcDoc={buildMermaidSrcDoc(content)} title="Mermaid diagram" transparent />
   );
 }
 

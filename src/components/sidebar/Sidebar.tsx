@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
+  Boxes,
   CalendarClock,
   Check,
   LogOut,
@@ -95,6 +96,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
   }
 
   const schedulesActive = pathname === "/schedules";
+  const artifactsActive = pathname === "/artifacts";
 
   function beginRename(c: ConversationSummary) {
     setEditingId(c.id);
@@ -114,21 +116,30 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
 
   if (!open) {
     return (
-      <div className="flex h-full w-full flex-col items-center gap-2 bg-sidebar py-2.5">
-        <IconButton label="Open sidebar" onClick={onToggle}>
-          <PanelLeft size={20} />
-        </IconButton>
-        <IconButton label="New chat" onClick={handleNewChat}>
-          <PenSquare size={20} />
-        </IconButton>
-        <IconButton
-          label="Scheduled"
-          active={schedulesActive}
-          onClick={() => router.push("/schedules")}
-        >
-          <CalendarClock size={20} />
-        </IconButton>
-      </div>
+      <>
+        <div className="flex h-full w-full flex-col items-center gap-2 bg-sidebar py-2.5">
+          <IconButton label="Open sidebar" onClick={onToggle}>
+            <PanelLeft size={20} />
+          </IconButton>
+          <IconButton label="New chat" onClick={handleNewChat}>
+            <PenSquare size={20} />
+          </IconButton>
+          <IconButton
+            label="Artifacts"
+            active={artifactsActive}
+            onClick={() => router.push("/artifacts")}
+          >
+            <Boxes size={20} />
+          </IconButton>
+          <IconButton
+            label="Scheduled"
+            active={schedulesActive}
+            onClick={() => router.push("/schedules")}
+          >
+            <CalendarClock size={20} />
+          </IconButton>
+        </div>
+      </>
     );
   }
 
@@ -144,16 +155,8 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         </IconButton>
       </div>
 
-      {/* New chat + Scheduled nav */}
+      {/* Scheduled nav */}
       <div className="flex flex-col gap-0.5 px-2.5">
-        <button
-          type="button"
-          onClick={handleNewChat}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover"
-        >
-          <PenSquare size={18} />
-          New chat
-        </button>
         <button
           type="button"
           onClick={() => router.push("/schedules")}
@@ -166,6 +169,19 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         >
           <CalendarClock size={18} />
           Scheduled
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push("/artifacts")}
+          className={cn(
+            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+            artifactsActive
+              ? "bg-hover text-text-primary"
+              : "text-text-primary hover:bg-hover",
+          )}
+        >
+          <Boxes size={18} />
+          Artifacts
         </button>
       </div>
 

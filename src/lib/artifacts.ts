@@ -13,6 +13,7 @@ import {
   ARTIFACT_TYPES,
   type Artifact,
   type ArtifactCommand,
+  type ArtifactLibraryItem,
   type ArtifactRef,
   type ArtifactSnapshot,
   type ArtifactType,
@@ -111,6 +112,26 @@ export async function loadConversationArtifacts(
     include: { versions: { orderBy: { version: "asc" } } },
   });
   return rows.map(serializeArtifact);
+}
+
+/** Load every artifact owned by a user, newest first, with its chat title. */
+export async function loadUserArtifacts(
+  prisma: PrismaClient,
+  userId: string,
+): Promise<ArtifactLibraryItem[]> {
+  const rows = await prisma.artifact.findMany({
+    where: { conversation: { userId } },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      versions: { orderBy: { version: "asc" } },
+      conversation: { select: { title: true } },
+    },
+  });
+
+  return rows.map((row) => ({
+    ...serializeArtifact(row),
+    conversationTitle: row.conversation.title,
+  }));
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ export interface SvgArtifactProps {
 }
 
 export function SvgArtifact({ content }: SvgArtifactProps) {
-  return <SandboxFrame srcDoc={buildSvgSrcDoc(content)} title="SVG preview" />;
+  return <SandboxFrame srcDoc={buildSvgSrcDoc(content)} title="SVG preview" transparent />;
 }
 
 export default SvgArtifact;

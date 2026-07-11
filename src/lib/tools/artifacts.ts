@@ -16,7 +16,8 @@ import type { Tool } from "@openai/agents";
 const TYPE_DESCRIPTION =
   "The artifact kind: 'code' (syntax-highlighted source; also set `language`), " +
   "'markdown' (a rich text document), 'html' (a self-contained web page rendered " +
-  "in a sandboxed iframe), 'svg' (an SVG image), 'mermaid' (a Mermaid diagram), or " +
+  "in a sandboxed iframe), 'svg' (an SVG image), 'image' (an image or data URL), " +
+  "'mermaid' (a Mermaid diagram), or " +
   "'react' (a self-contained interactive React component with a default export).";
 
 export const createArtifactTool: Tool = tool({
@@ -36,7 +37,7 @@ export const createArtifactTool: Tool = tool({
           "rewrite_artifact to revise it.",
       ),
     type: z
-      .enum(["code", "markdown", "html", "svg", "mermaid", "react"])
+      .enum(["code", "markdown", "html", "svg", "image", "mermaid", "react"])
       .describe(TYPE_DESCRIPTION),
     title: z
       .string()
