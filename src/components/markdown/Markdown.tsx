@@ -29,6 +29,11 @@ function normalizeMath(input: string): string {
       // Odd indices are the captured code segments — leave them verbatim.
       if (i % 2 === 1) return seg;
       return seg
+        // Escape currency-style dollar signs ("$50,000", "$45k") so remark-math's
+        // single-dollar inline math doesn't swallow them (and everything up to the
+        // next "$") as a math span. Real math reaches us as \(..\)/\[..\] and is
+        // converted to $/$$ below — AFTER this escape — so it is unaffected.
+        .replace(/\$(?=\d)/g, "\\$")
         .replace(/\\\[([\s\S]+?)\\\]/g, (_m, body) => `\n\n$$\n${body.trim()}\n$$\n\n`)
         .replace(/\\\(([\s\S]+?)\\\)/g, (_m, body) => `$${body.trim()}$`);
     })
