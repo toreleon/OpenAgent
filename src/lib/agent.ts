@@ -356,6 +356,15 @@ export async function* streamChat(
       },
     });
 
+    // Attach an eager no-op catch to `.completed`: the SDK rejects it the instant
+    // the run fails (e.g. MaxTurnsExceeded), which can happen while the for-await
+    // loop below is still draining events — before we `await completed`. Without a
+    // handler already attached, that rejection surfaces as an unhandledRejection
+    // and crashes the Node process. The `await completed` below still throws into
+    // our catch so the error is reported to the client as normal.
+    const completed = streamed.completed;
+    completed.catch(() => {});
+
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
       if (event.type === "raw_model_stream_event") {
         const data = event.data as {
@@ -428,7 +437,7 @@ export async function* streamChat(
     }
 
     // Ensure the run fully settled (surfaces late errors).
-    await streamed.completed;
+    await completed;
   } catch (err) {
     yield {
       type: "error",
@@ -613,6 +622,10 @@ export async function* streamCompletion(
   let reasoningDone = false;
   try {
     const streamed = await run(agent, [user(params.user)], { stream: true });
+    // Eager no-op catch so a `.completed` rejection during the loop drain can't
+    // become an unhandledRejection (see streamChat); `await completed` still throws.
+    const completed = streamed.completed;
+    completed.catch(() => {});
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
       if (event.type !== "raw_model_stream_event") continue;
       const data = event.data as {
@@ -646,7 +659,7 @@ export async function* streamCompletion(
         }
       }
     }
-    await streamed.completed;
+    await completed;
   } catch (err) {
     yield {
       type: "error",

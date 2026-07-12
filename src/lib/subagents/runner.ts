@@ -216,6 +216,16 @@ async function runOne(
       },
     });
 
+    // The SDK rejects `.completed` the instant the run fails (e.g. a worker that
+    // loops until MaxTurnsExceededError). That rejection can land WHILE the
+    // for-await loop below is still draining buffered events — i.e. before we
+    // reach `await completed`. A rejected promise with no handler attached
+    // triggers Node's `unhandledRejection`, which crashes the dev server. Capture
+    // the promise once and attach an eager no-op catch so it is always "handled";
+    // the `await completed` below still surfaces the real error to our catch.
+    const completed = streamed.completed;
+    completed.catch(() => {});
+
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
       if (event.type === "raw_model_stream_event") {
         const data = event.data as { type?: string; delta?: unknown };
@@ -240,7 +250,7 @@ async function runOne(
       }
     }
 
-    await streamed.completed;
+    await completed;
   } catch (err) {
     const error =
       err instanceof Error ? err.message : "The subagent failed to respond.";
