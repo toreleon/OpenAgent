@@ -10,7 +10,6 @@ import { Sidebar } from "@/components/sidebar/Sidebar";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
-import { ModelPicker } from "./ModelPicker";
 import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { cn } from "@/components/ui/cn";
 
@@ -236,15 +235,8 @@ export function ChatApp({ conversationId }: ChatAppProps) {
       </div>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        {/* Top bar */}
+        {/* Top bar (Claude-style: no model selector here — model lives in the composer) */}
         <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-          <ModelPicker
-            value={model}
-            onChange={setModel}
-            disabled={isStreaming}
-            side="bottom"
-            align="start"
-          />
           {activeProjectId && (
             <button
               type="button"
