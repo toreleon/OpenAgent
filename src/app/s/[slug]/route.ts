@@ -27,6 +27,8 @@
 import prisma from "@/lib/db";
 import { loadPublicSite } from "@/lib/sites";
 import { sitesDomain, slugFromHost, siteCanonicalUrl } from "@/lib/sites/origin";
+import { resolveBackendSite } from "@/lib/sites/gate";
+import { injectSitesShim } from "@/lib/sites/shim";
 import { buildSiteSrcDoc, SITE_CDN_HOSTS } from "@/components/artifacts/sandbox";
 
 export const runtime = "nodejs";
@@ -131,5 +133,13 @@ export async function GET(req: Request, { params }: { params: { slug: string } }
   }
   // On its own origin (subdomain) → real-origin CSP (no sandbox). Legacy path
   // serving (SITES_DOMAIN unset) keeps the opaque-origin sandbox.
-  return html(buildSiteSrcDoc(site.type, site.content), 200, viaSiteHost ? REAL_ORIGIN_CSP : OPAQUE_CSP);
+  let doc = buildSiteSrcDoc(site.type, site.content);
+  // When served on its own origin AND the backend is enabled, inject the `Sites`
+  // shim so the page can reach its same-origin /api/* data plane. Never injected
+  // on the legacy opaque origin (where same-origin fetch is blocked) or into
+  // in-app artifact previews (which never hit this route).
+  if (viaSiteHost && (await resolveBackendSite(params.slug))) {
+    doc = injectSitesShim(doc);
+  }
+  return html(doc, 200, viaSiteHost ? REAL_ORIGIN_CSP : OPAQUE_CSP);
 }

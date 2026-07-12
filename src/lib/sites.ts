@@ -31,6 +31,7 @@ import {
   type SiteVersionInfo,
   type SiteVisibility,
 } from "@/lib/types";
+import { siteStore } from "@/lib/sites/data-db";
 
 // ---------------------------------------------------------------------------
 // Row shapes (a Site with its versions loaded)
@@ -89,6 +90,14 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 
 function coerceSiteType(v: string): SiteType {
   return isSiteType(v) ? v : "html";
+}
+
+/** True when a create_site `backend` manifest asks for any server capability. */
+function declaresBackend(v: unknown): boolean {
+  const b = asRecord(v);
+  if (!b) return false;
+  const cols = b["collections"];
+  return b["kv"] === true || (Array.isArray(cols) && cols.length > 0);
 }
 
 function coerceVisibility(v: string | null | undefined): SiteVisibility {
@@ -535,6 +544,9 @@ export async function deleteSite(
   if (!owned) return false;
   await prisma.siteVersion.deleteMany({ where: { siteId } });
   await prisma.site.delete({ where: { id: siteId } });
+  // Also drop the Site's mini-app data (isolated sites-data.db): config, KV,
+  // documents, usage, rate buckets — there is no cross-DB FK to cascade it.
+  await siteStore.purgeSite(siteId);
   return true;
 }
 
@@ -544,8 +556,11 @@ export async function deleteSite(
  * serving its content.
  */
 export async function deleteUserSites(prisma: PrismaClient, userId: string): Promise<void> {
+  const sites = await prisma.site.findMany({ where: { userId }, select: { id: true } });
   await prisma.siteVersion.deleteMany({ where: { site: { userId } } });
   await prisma.site.deleteMany({ where: { userId } });
+  // Drop each Site's mini-app data from the isolated sites-data.db too.
+  for (const s of sites) await siteStore.purgeSite(s.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +614,7 @@ async function applyCreate(
     return { ok: false, error: "create_site: invalid `type` (use html, react, markdown, svg, or mermaid)" };
   }
   const type: SiteType = typeRaw;
+  const wantsBackend = declaresBackend(args["backend"]);
 
   // Reuse the current conversation Site when the model re-issues create for the
   // same name (idempotent-ish); otherwise start a fresh Site.
@@ -608,6 +624,10 @@ async function applyCreate(
       where: { id: existing.id },
       data: { name, draftType: type, draftContent: content, draftLanguage: language },
     });
+    // Turn the backend on when the model declares one. Public exposure is still
+    // gated by an explicit deploy (link-visibility + live), so this doesn't
+    // publish anything on its own.
+    if (wantsBackend) await siteStore.setConfig(existing.id, { enabled: true });
     const row = await reloadSite(prisma, existing.id);
     return { ok: true, snapshot: serializeSnapshot(row, "create"), ref: buildRef(row, "create") };
   }
@@ -621,6 +641,7 @@ async function applyCreate(
     sourceType: "tool",
     createdInConversationId: conversationId,
   });
+  if (wantsBackend) await siteStore.setConfig(detail.id, { enabled: true });
   const row = await reloadSite(prisma, detail.id);
   return { ok: true, snapshot: serializeSnapshot(row, "create"), ref: buildRef(row, "create") };
 }

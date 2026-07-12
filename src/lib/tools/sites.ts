@@ -32,7 +32,10 @@ export const createSiteTool: Tool = tool({
     "shareable site, web app, landing page, dashboard, or game (not a throwaway " +
     "snippet). Calling create_site again in the same chat replaces the current " +
     "site's DRAFT. Editing the draft does NOT publish it — the site only goes live " +
-    "when it is deployed. After creating, don't paste the full content into your reply.",
+    "when it is deployed. For a site that must REMEMBER data across visitors (guestbook, poll, " +
+    "counter, saved state, submissions), also pass the `backend` manifest and have the page use the " +
+    "injected `Sites` API — that is what makes a Site a real mini-app rather than a static page. " +
+    "After creating, don't paste the full content into your reply.",
   parameters: z.object({
     name: z
       .string()
@@ -51,6 +54,32 @@ export const createSiteTool: Tool = tool({
       .nullable()
       .optional()
       .describe("Unused for sites; leave null."),
+    backend: z
+      .object({
+        kv: z
+          .boolean()
+          .nullable()
+          .optional()
+          .describe("Enable a per-site key/value store for shared state (counters, saved settings)."),
+        collections: z
+          .array(z.string())
+          .nullable()
+          .optional()
+          .describe(
+            "Names of append-only document collections to enable, e.g. ['guestbook','signups'].",
+          ),
+      })
+      .nullable()
+      .optional()
+      .describe(
+        "Declare a SERVER BACKEND so the site can persist shared, cross-visitor data. Omit for a " +
+          "static site. When set, the page may call the injected `Sites` API (available as " +
+          "window.Sites): `await Sites.kv.get(collection, key)` / `await Sites.kv.put(collection, " +
+          "key, value)` and `await Sites.docs.append(collection, obj)` / `await Sites.docs.list(" +
+          "collection)`. All data is SHARED and PUBLIC — anyone with the link can read AND write it, " +
+          "so never store secrets or private/personal info. Do NOT use localStorage for shared state; " +
+          "use the Sites API. The backend serves only once the site is deployed.",
+      ),
   }),
   async execute({ name }) {
     return (
