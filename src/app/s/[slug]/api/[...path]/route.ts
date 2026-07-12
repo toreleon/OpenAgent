@@ -34,6 +34,7 @@
 import { createHash } from "crypto";
 import { resolveBackendSite } from "@/lib/sites/gate";
 import { siteStore, SiteQuotaExceededError } from "@/lib/sites/data-db";
+import { invokeEndpoint } from "@/lib/sites/proxy";
 import { sitesDomain, slugFromHost } from "@/lib/sites/origin";
 import {
   newVisitorToken,
@@ -337,6 +338,23 @@ export async function POST(req: Request, { params }: Params) {
   const path = params.path ?? [];
 
   if (path[0] === "account") return handleAccount(req, r.siteId, path);
+
+  // Owner-armed fetch proxy: POST /api/call/<name> { params }.
+  if (path[0] === "call" && path.length === 2) {
+    if (!validName(path[1])) return json({ error: "bad_name" }, 400);
+    const limited = await rateGuard(req, r.siteId);
+    if (limited) return limited;
+    const body = await readJsonBody(req);
+    if ("deny" in body) return body.deny;
+    const rec = body.value as Record<string, unknown> | null;
+    const params =
+      rec && typeof rec.params === "object" && rec.params !== null
+        ? (rec.params as Record<string, unknown>)
+        : {};
+    const result = await invokeEndpoint(r.siteId, path[1], params);
+    if (!result.ok) return json({ error: result.error }, result.code);
+    return json({ status: result.status, body: result.body });
+  }
 
   if (path[0] !== "docs" || path.length !== 2) return notFound();
   if (!validName(path[1])) return json({ error: "bad_name" }, 400);

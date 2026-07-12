@@ -92,12 +92,40 @@ function coerceSiteType(v: string): SiteType {
   return isSiteType(v) ? v : "html";
 }
 
-/** True when a create_site `backend` manifest asks for any server capability. */
-function declaresBackend(v: unknown): boolean {
-  const b = asRecord(v);
-  if (!b) return false;
+const ENDPOINT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+
+/**
+ * Apply a create_site `backend` manifest to a Site: flip the backend master
+ * switch on when it declares any capability, and PROPOSE (unarmed) any endpoints
+ * the model declared. Endpoints stay inert until the owner arms them out-of-band
+ * — the model can never choose a secret's destination.
+ */
+async function applyBackendManifest(siteId: string, backendRaw: unknown): Promise<void> {
+  const b = asRecord(backendRaw);
+  if (!b) return;
   const cols = b["collections"];
-  return b["kv"] === true || (Array.isArray(cols) && cols.length > 0);
+  const eps = b["endpoints"];
+  const wants =
+    b["kv"] === true ||
+    (Array.isArray(cols) && cols.length > 0) ||
+    (Array.isArray(eps) && eps.length > 0);
+  if (!wants) return;
+  await siteStore.setConfig(siteId, { enabled: true });
+  if (Array.isArray(eps)) {
+    for (const raw of eps) {
+      const e = asRecord(raw);
+      const name = e && typeof e["name"] === "string" ? e["name"] : null;
+      const urlTemplate = e && typeof e["urlTemplate"] === "string" ? e["urlTemplate"] : null;
+      const methodRaw = e && typeof e["method"] === "string" ? e["method"].toUpperCase() : "GET";
+      if (name && urlTemplate && ENDPOINT_NAME_RE.test(name)) {
+        await siteStore.proposeEndpoint(siteId, {
+          name,
+          method: methodRaw === "POST" ? "POST" : "GET",
+          urlTemplate,
+        });
+      }
+    }
+  }
 }
 
 function coerceVisibility(v: string | null | undefined): SiteVisibility {
@@ -614,7 +642,6 @@ async function applyCreate(
     return { ok: false, error: "create_site: invalid `type` (use html, react, markdown, svg, or mermaid)" };
   }
   const type: SiteType = typeRaw;
-  const wantsBackend = declaresBackend(args["backend"]);
 
   // Reuse the current conversation Site when the model re-issues create for the
   // same name (idempotent-ish); otherwise start a fresh Site.
@@ -624,10 +651,10 @@ async function applyCreate(
       where: { id: existing.id },
       data: { name, draftType: type, draftContent: content, draftLanguage: language },
     });
-    // Turn the backend on when the model declares one. Public exposure is still
-    // gated by an explicit deploy (link-visibility + live), so this doesn't
-    // publish anything on its own.
-    if (wantsBackend) await siteStore.setConfig(existing.id, { enabled: true });
+    // Turn the backend on + propose endpoints when the model declares them.
+    // Public exposure is still gated by an explicit deploy, and endpoints stay
+    // UNARMED until the owner approves them — so this publishes nothing on its own.
+    await applyBackendManifest(existing.id, args["backend"]);
     const row = await reloadSite(prisma, existing.id);
     return { ok: true, snapshot: serializeSnapshot(row, "create"), ref: buildRef(row, "create") };
   }
@@ -641,7 +668,7 @@ async function applyCreate(
     sourceType: "tool",
     createdInConversationId: conversationId,
   });
-  if (wantsBackend) await siteStore.setConfig(detail.id, { enabled: true });
+  await applyBackendManifest(detail.id, args["backend"]);
   const row = await reloadSite(prisma, detail.id);
   return { ok: true, snapshot: serializeSnapshot(row, "create"), ref: buildRef(row, "create") };
 }

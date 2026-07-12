@@ -18,6 +18,7 @@
  */
 import { createHash } from "crypto";
 import { PrismaClient } from "@/generated/sites-data-client";
+import { decryptSecret, encryptSecret } from "@/lib/sites/secrets";
 
 // ---------------------------------------------------------------------------
 // Client singleton (global-cached to survive Next.js dev hot-reload)
@@ -302,6 +303,138 @@ export const siteStore = {
     return row;
   },
 
+  // ---- Secrets + proxied endpoints (Phase 3) ----
+
+  /** Owner action: store an encrypted secret. Returns false if secrets are off. */
+  async setSecret(siteId: string, name: string, value: string): Promise<boolean> {
+    const enc = encryptSecret(value, siteId, name);
+    if (!enc) return false;
+    await sitesDataDb.siteSecret.upsert({
+      where: { siteId_name: { siteId, name } },
+      create: { siteId, name, ciphertext: enc.ciphertext, nonce: enc.nonce },
+      update: { ciphertext: enc.ciphertext, nonce: enc.nonce },
+    });
+    return true;
+  },
+
+  /** Secret NAMES for a Site (never values) — for the owner UI. */
+  async listSecretNames(siteId: string): Promise<string[]> {
+    const rows = await sitesDataDb.siteSecret.findMany({
+      where: { siteId },
+      select: { name: true },
+      orderBy: { name: "asc" },
+    });
+    return rows.map((r) => r.name);
+  },
+
+  /** Delete a secret. */
+  async deleteSecret(siteId: string, name: string): Promise<void> {
+    await sitesDataDb.siteSecret.deleteMany({ where: { siteId, name } });
+  },
+
+  /** Decrypt a secret for the proxy (server-side only). */
+  async getDecryptedSecret(siteId: string, name: string): Promise<string | null> {
+    const row = await sitesDataDb.siteSecret.findUnique({
+      where: { siteId_name: { siteId, name } },
+      select: { ciphertext: true, nonce: true },
+    });
+    if (!row) return null;
+    return decryptSecret(row.ciphertext, row.nonce, siteId, name);
+  },
+
+  /**
+   * Model action: propose an endpoint UNARMED. If it already exists and the
+   * template/method changed, it is re-disarmed (the owner must re-approve the new
+   * destination); an unchanged re-propose preserves the owner's arming.
+   */
+  async proposeEndpoint(
+    siteId: string,
+    input: { name: string; method: string; urlTemplate: string },
+  ): Promise<void> {
+    const existing = await sitesDataDb.siteEndpoint.findUnique({
+      where: { siteId_name: { siteId, name: input.name } },
+      select: { urlTemplate: true, method: true },
+    });
+    if (!existing) {
+      await sitesDataDb.siteEndpoint.create({
+        data: { siteId, name: input.name, method: input.method, urlTemplate: input.urlTemplate },
+      });
+      return;
+    }
+    const changed =
+      existing.urlTemplate !== input.urlTemplate || existing.method !== input.method;
+    if (changed) {
+      await sitesDataDb.siteEndpoint.update({
+        where: { siteId_name: { siteId, name: input.name } },
+        data: { method: input.method, urlTemplate: input.urlTemplate, armed: false, approvedHost: null },
+      });
+    }
+  },
+
+  /** Owner action: arm an endpoint by approving its host + secret injections. */
+  async armEndpoint(
+    siteId: string,
+    name: string,
+    input: { approvedHost: string; secretRefs: string[]; dailyBudget?: number },
+  ): Promise<boolean> {
+    const res = await sitesDataDb.siteEndpoint.updateMany({
+      where: { siteId, name },
+      data: {
+        approvedHost: input.approvedHost,
+        secretRefs: JSON.stringify(input.secretRefs),
+        armed: true,
+        ...(input.dailyBudget != null ? { dailyBudget: input.dailyBudget } : {}),
+      },
+    });
+    return res.count > 0;
+  },
+
+  /** Full endpoint row (proxy use). */
+  async getEndpoint(siteId: string, name: string) {
+    return sitesDataDb.siteEndpoint.findUnique({
+      where: { siteId_name: { siteId, name } },
+    });
+  },
+
+  /** Endpoints for the owner UI (no secret values exist on the row anyway). */
+  async listEndpoints(siteId: string) {
+    return sitesDataDb.siteEndpoint.findMany({
+      where: { siteId },
+      orderBy: { name: "asc" },
+      select: {
+        name: true,
+        method: true,
+        urlTemplate: true,
+        approvedHost: true,
+        secretRefs: true,
+        armed: true,
+        dailyBudget: true,
+      },
+    });
+  },
+
+  /**
+   * Atomically consume one call against an endpoint's daily budget (resetting the
+   * window when the UTC day rolls over). Returns false when the budget is spent.
+   */
+  async consumeEndpointBudget(siteId: string, endpointId: string): Promise<boolean> {
+    const today = new Date().toISOString().slice(0, 10);
+    return sitesDataDb.$transaction(async (tx) => {
+      const ep = await tx.siteEndpoint.findFirst({
+        where: { id: endpointId, siteId },
+        select: { callsToday: true, dayStamp: true, dailyBudget: true },
+      });
+      if (!ep) return false;
+      const calls = ep.dayStamp === today ? ep.callsToday : 0;
+      if (ep.dailyBudget > 0 && calls >= ep.dailyBudget) return false;
+      await tx.siteEndpoint.update({
+        where: { id: endpointId },
+        data: { callsToday: calls + 1, dayStamp: today },
+      });
+      return true;
+    });
+  },
+
   /** Delete ALL data for a Site (called from the app-side Site delete cascade). */
   async purgeSite(siteId: string): Promise<void> {
     await sitesDataDb.$transaction([
@@ -310,6 +443,8 @@ export const siteStore = {
       sitesDataDb.siteUsage.deleteMany({ where: { siteId } }),
       sitesDataDb.siteBackendConfig.deleteMany({ where: { siteId } }),
       sitesDataDb.siteAccount.deleteMany({ where: { siteId } }),
+      sitesDataDb.siteSecret.deleteMany({ where: { siteId } }),
+      sitesDataDb.siteEndpoint.deleteMany({ where: { siteId } }),
     ]);
   },
 

@@ -82,6 +82,44 @@ model SiteUsage {
   rows   Int    @default(0)
 }
 
+/// An encrypted secret for a Site's fetch proxy (Phase 3). The VALUE is
+/// AES-256-GCM ciphertext (nonce + AAD siteId||name); it is set by the OWNER and
+/// never returned to any client or the model. See src/lib/sites/secrets.ts.
+model SiteSecret {
+  id         String   @id @default(cuid())
+  siteId     String
+  name       String
+  ciphertext String
+  nonce      String
+  createdAt  DateTime @default(now())
+
+  @@unique([siteId, name])
+  @@index([siteId])
+}
+
+/// A proxied outbound endpoint for a Site (Phase 3). The MODEL proposes it
+/// (name + method + urlTemplate) UNARMED; the OWNER arms it out-of-band by
+/// approving the exact destination host + which secrets it may inject. It is
+/// un-invocable until `armed`. Visitor {param} values fill query placeholders;
+/// {{SECRET}} placeholders are filled server-side from SiteSecret.
+model SiteEndpoint {
+  id          String   @id @default(cuid())
+  siteId      String
+  name        String
+  method      String   @default("GET")
+  urlTemplate String
+  approvedHost String? // OWNER-set; the resolved URL host must equal this
+  secretRefs  String   @default("[]") // JSON string[] of secret names to inject
+  armed       Boolean  @default(false)
+  dailyBudget Int      @default(1000) // 0 = unlimited
+  callsToday  Int      @default(0)
+  dayStamp    String   @default("") // YYYY-MM-DD for the budget window
+  createdAt   DateTime @default(now())
+
+  @@unique([siteId, name])
+  @@index([siteId])
+}
+
 /// A named visitor ACCOUNT for a Site (Phase 2b): username + password login on
 /// top of the anonymous visitor identity, so a visitor's data is portable across
 /// devices. Accounts are per-Site (username unique within a siteId). Logged-in

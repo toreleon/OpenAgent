@@ -81,6 +81,9 @@ const SITES_SHIM = `<script>
       logout: function () {
         return req("POST", "/api/account/logout").then(function () { return true; });
       }
+    },
+    call: function (name, params) {
+      return req("POST", "/api/call/" + enc(name), { params: params || {} }).then(function (r) { return r.body; });
     }
   };
 })();

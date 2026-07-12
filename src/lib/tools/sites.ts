@@ -68,6 +68,31 @@ export const createSiteTool: Tool = tool({
           .describe(
             "Names of append-only document collections to enable, e.g. ['guestbook','signups'].",
           ),
+        endpoints: z
+          .array(
+            z.object({
+              name: z
+                .string()
+                .describe("Short endpoint name; the page calls Sites.call('<name>', params)."),
+              urlTemplate: z
+                .string()
+                .describe(
+                  "Full URL with {param} query placeholders (filled by the visitor) and " +
+                    "{{SECRET_NAME}} placeholders (filled server-side), e.g. " +
+                    "'https://api.example.com/v1?q={q}&key={{API_KEY}}'.",
+                ),
+              method: z.string().nullable().optional().describe("'GET' (default) or 'POST'."),
+            }),
+          )
+          .nullable()
+          .optional()
+          .describe(
+            "Propose outbound API endpoints the page can call via Sites.call(name, params). The " +
+              "secret named in {{...}} is injected server-side and NEVER reaches the client. " +
+              "IMPORTANT: endpoints are created UNARMED — they only work after the site OWNER " +
+              "approves the exact destination host and fills the secret value in the dashboard. You " +
+              "cannot arm them, see secret values, or choose a secret's destination.",
+          ),
       })
       .nullable()
       .optional()
