@@ -67,9 +67,10 @@ If the page contains nothing relevant to the subtopic, output exactly this singl
 // ---------------------------------------------------------------------------
 
 /**
- * System prompt for the final report. The report is streamed straight into the
- * chat message, so it must start with the report itself (no preamble) and end
- * with a "## Sources" section mapping [n] citations to the registry.
+ * System prompt for the final report. The report is delivered as a standalone
+ * `markdown` artifact (a document in the side panel), so it must start with the
+ * report itself (no preamble) and end with a "## Sources" section mapping [n]
+ * citations to the registry.
  */
 export const SYNTHESIS_SYSTEM = `You are an expert research writer. Using ONLY the research brief, the plan, and the numbered source findings supplied in the user message, write a thorough, well-structured research report in GitHub-flavored Markdown.
 

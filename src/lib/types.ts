@@ -426,6 +426,15 @@ export type StreamEvent =
    */
   | { type: "research_activity"; activity: ResearchActivity }
   /**
+   * Deep Research: the finished report, emitted once at the end of the pipeline.
+   * Carries the full GitHub-flavored Markdown report + a title. The /api/chat
+   * route consumes this INTERNALLY — it never forwards this event to the client;
+   * instead it persists the report as a `markdown` artifact and emits an
+   * `artifact` event, so the report opens as a document in the side panel rather
+   * than as inline chat text. See src/lib/research/orchestrator.ts.
+   */
+  | { type: "research_report"; title: string; content: string }
+  /**
    * Parallel subagents: a live status update for one dispatched worker. An
    * update with an existing `activity.id` REPLACES the prior one (running →
    * done|failed); a new id appends. Emitted from INSIDE the `run_subagents`

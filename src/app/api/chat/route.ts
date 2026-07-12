@@ -79,6 +79,20 @@ function finalizeTimeline(timeline: TraceItem[]): void {
   }
 }
 
+/**
+ * The short assistant message that accompanies a Deep Research report. The
+ * report itself is delivered as a `markdown` artifact opened in the side panel,
+ * so the chat bubble only introduces it and points the reader there.
+ */
+function buildReportLeadIn(title: string, sourceCount: number): string {
+  const name = title.trim() || "your topic";
+  if (sourceCount <= 0) {
+    return `I've written up my research on **${name}** as a report — open the document in the panel to read it. Live web sources were unavailable, so it draws on general knowledge; please verify key facts independently.`;
+  }
+  const sources = sourceCount === 1 ? "1 source" : `${sourceCount} sources`;
+  return `I've finished researching **${name}** and compiled the findings into a report drawing on ${sources}. Open the document in the panel to read the full write-up.`;
+}
+
 /** Decode the JSON-string `research` column into ResearchState, tolerating bad data. */
 function decodeResearch(value: string | null): ResearchState | undefined {
   if (!value) return undefined;
@@ -588,6 +602,12 @@ export async function POST(req: Request) {
 
           let researchPlan: ResearchPlan | undefined;
           const researchActivities: ResearchActivity[] = [];
+          // The finished report, delivered by the pipeline's `research_report`
+          // event. It becomes a `markdown` artifact (a side-panel document)
+          // rather than inline chat text; the bubble gets a short lead-in below.
+          let reportTitle = "";
+          let reportContent = "";
+          let reportArtifactCreated = false;
 
           for await (const event of streamDeepResearch({
             brief,
@@ -610,6 +630,55 @@ export async function POST(req: Request) {
                 if (idx >= 0) researchActivities[idx] = event.activity;
                 else researchActivities.push(event.activity);
                 send(event);
+                break;
+              }
+              case "research_report": {
+                // Persist the report as a markdown artifact and open it in the
+                // side panel (via the `artifact` event) instead of streaming it
+                // into the chat bubble. The identifier is keyed to this message
+                // so a regenerate produces a distinct artifact rather than
+                // versioning an unrelated prior report.
+                reportTitle = event.title || researchPlan?.title || "Research Report";
+                reportContent = event.content;
+                // Skip on an errored run: don't publish a success artifact for a
+                // truncated report, and honor the "no events after error"
+                // ordering (an `error` was already sent). The partial report
+                // still falls back to inline content below, so it isn't lost.
+                if (reportContent.trim() && !sawError) {
+                  artifactAttempted = true;
+                  try {
+                    const result = await applyArtifactCommand(prisma, {
+                      conversationId,
+                      messageId: assistantMessageId,
+                      command: "create",
+                      args: {
+                        identifier: `research-report-${assistantMessageId}`,
+                        title: reportTitle,
+                        content: reportContent,
+                        type: "markdown",
+                      },
+                    });
+                    if (result.ok) {
+                      artifactRefs.push(result.ref);
+                      reportArtifactCreated = true;
+                      send({
+                        type: "artifact",
+                        command: "create",
+                        artifact: result.snapshot,
+                      });
+                    } else {
+                      console.error(
+                        "[chat] research report artifact failed:",
+                        result.error,
+                      );
+                    }
+                  } catch (err) {
+                    console.error(
+                      "[chat] research report artifact error:",
+                      err,
+                    );
+                  }
+                }
                 break;
               }
               case "reasoning_delta":
@@ -638,6 +707,31 @@ export async function POST(req: Request) {
           const sourceCount = researchActivities.filter(
             (a) => a.kind === "source" && a.status === "done",
           ).length;
+
+          // The report lives in the artifact panel, so the chat bubble carries
+          // only a short lead-in pointing at it. If the artifact could not be
+          // created (empty report or a persistence error), fall back to showing
+          // the report inline so the research is never lost.
+          if (reportArtifactCreated) {
+            assembled = buildReportLeadIn(reportTitle, sourceCount);
+          } else if (reportContent.trim()) {
+            assembled = reportContent;
+          } else if (!sawError && assembled.trim() === "") {
+            // No report and no error surfaced: never leave a blank bubble.
+            assembled =
+              "I wasn't able to produce a research report this time. Please try again.";
+          }
+
+          // The report body was delivered via the `artifact` event; synthesis
+          // `delta`s were buffered, not streamed, so nothing has populated the
+          // live message content yet. Emit the bubble text as a single delta so
+          // it shows during the turn (not only after a reload). Suppressed on
+          // error to honor "error then close — no events after error"; the
+          // content still persists below and reappears on reload.
+          if (assembled && !sawError) {
+            send({ type: "delta", text: assembled });
+          }
+
           researchColumn = JSON.stringify({
             phase: "report",
             brief,

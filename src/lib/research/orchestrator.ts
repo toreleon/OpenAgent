@@ -225,10 +225,14 @@ export async function* streamClarifyingQuestions(
  *   1. one `research_plan`
  *   2. per subtopic: a `search` activity (active → done), then per source a
  *      `source` activity (active → done|failed) and an `analyze` activity
- *   3. a `synthesize` activity (active), the streamed report (`reasoning_*` +
- *      `delta`), then the `synthesize` activity (done)
+ *   3. a `synthesize` activity (active), any `reasoning_*` events from the
+ *      writer, the `synthesize` activity (done), then a single
+ *      `research_report` carrying the finished Markdown report + title
  *
- * Never throws: unexpected failures yield a single `error` event and return.
+ * The report is intentionally NOT streamed as `delta`: the route turns the
+ * `research_report` into a `markdown` artifact (a side-panel document) rather
+ * than inline chat text. Never throws: unexpected failures yield a single
+ * `error` event and return.
  */
 export async function* streamDeepResearch(
   p: DeepResearchParams,
@@ -332,16 +336,37 @@ export async function* streamDeepResearch(
     }
 
     // --- (c) SYNTHESIZE ---------------------------------------------------
+    // The report is delivered as a `markdown` artifact (a document in the side
+    // panel), NOT streamed inline into the chat message. So we forward the
+    // `reasoning_*` events (to keep the Thinking trace live) but BUFFER the
+    // answer `delta`s into `report` instead of yielding them, then emit the
+    // finished report as a single `research_report` event. The "Writing report"
+    // activity spins meanwhile, so the user still sees progress.
     yield activityEvent("synth", "synthesize", "Writing report", "active");
+    let report = "";
     for await (const event of streamCompletion({
       system: SYNTHESIS_SYSTEM,
       user: buildSynthesisUser(p.brief, plan, registry, findings),
       model: p.model,
       effort: p.effort ?? "medium",
     })) {
-      yield event;
+      switch (event.type) {
+        case "delta":
+          report += event.text;
+          break;
+        case "reasoning_delta":
+        case "reasoning_done":
+        case "error":
+          yield event;
+          break;
+        default:
+          break;
+      }
     }
     yield activityEvent("synth", "synthesize", "Writing report", "done");
+
+    const reportTitle = (plan.title || p.brief.slice(0, 80) || "Research Report").trim();
+    yield { type: "research_report", title: reportTitle, content: report.trim() };
   } catch (err) {
     yield {
       type: "error",
