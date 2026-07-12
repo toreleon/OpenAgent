@@ -26,6 +26,7 @@
  */
 import prisma from "@/lib/db";
 import { loadPublicSite } from "@/lib/sites";
+import { sitesDomain, slugFromHost, siteCanonicalUrl } from "@/lib/sites/origin";
 import { buildSiteSrcDoc, SITE_CDN_HOSTS } from "@/components/artifacts/sandbox";
 
 export const runtime = "nodejs";
@@ -33,8 +34,13 @@ export const dynamic = "force-dynamic";
 
 const CDN = SITE_CDN_HOSTS.join(" ");
 
-/** CSP that opaques the document's origin and pins it to the sandbox CDNs. */
-const CSP = [
+/**
+ * LEGACY CSP — opaques the document's origin and pins it to the sandbox CDNs.
+ * Used only when subdomain serving is NOT configured (SITES_DOMAIN unset): the
+ * page shares the app origin, so it must be forced into an opaque origin exactly
+ * like the in-app artifact iframe.
+ */
+const OPAQUE_CSP = [
   "sandbox allow-scripts allow-popups",
   "default-src 'none'",
   `script-src 'unsafe-inline' 'unsafe-eval' ${CDN}`,
@@ -47,12 +53,33 @@ const CSP = [
   "base-uri 'none'",
 ].join("; ");
 
+/**
+ * REAL-ORIGIN CSP — used when the Site is served on its OWN origin
+ * (`<slug>.<SITES_DOMAIN>`). The `sandbox` directive is intentionally DROPPED so
+ * the page is a normal document on its own origin (own storage, same-origin
+ * `/api/*` in later phases, forms post to itself). Isolation from the APP comes
+ * from the separate registrable domain (+ host-only app cookie); isolation from
+ * OTHER sites comes from each site's distinct subdomain origin. `'self'` now
+ * resolves to the site's own origin, so it is safe to allow.
+ */
+const REAL_ORIGIN_CSP = [
+  "default-src 'none'",
+  `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${CDN}`,
+  `style-src 'self' 'unsafe-inline' ${CDN}`,
+  "img-src * data: blob:",
+  `font-src data: ${CDN}`,
+  `connect-src 'self' ${CDN}`,
+  "frame-src 'none'",
+  "form-action 'self'",
+  "base-uri 'none'",
+].join("; ");
+
 function html(body: string, status: number, extraCsp?: string): Response {
   return new Response(body, {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": extraCsp ?? CSP,
+      "Content-Security-Policy": extraCsp ?? OPAQUE_CSP,
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "X-Frame-Options": "DENY",
@@ -79,7 +106,19 @@ const NOT_FOUND = `<!doctype html>
   <body><div class="box"><h1>404</h1><p>This site isn't available.</p></div></body>
 </html>`;
 
-export async function GET(_req: Request, { params }: { params: { slug: string } }) {
+export async function GET(req: Request, { params }: { params: { slug: string } }) {
+  const domain = sitesDomain();
+  const viaSiteHost = slugFromHost(req.headers.get("host")) !== null;
+
+  // Subdomain serving is configured, but this request arrived on the APP host via
+  // the legacy /s/<slug> path → 301 to the site's own origin. We redirect BEFORE
+  // any DB lookup, so a known and an unknown slug behave identically here (no
+  // existence leak on the app host); the subdomain 404s unknown slugs.
+  if (domain && !viaSiteHost) {
+    const canonical = siteCanonicalUrl(params.slug, new URL(req.url).protocol, "/");
+    if (canonical) return Response.redirect(canonical, 301);
+  }
+
   const site = await loadPublicSite(prisma, params.slug);
   // 404 for missing / private / undeployed — never distinguish (no existence leak).
   // The not-found page carries a strict, no-CDN CSP of its own.
@@ -90,5 +129,7 @@ export async function GET(_req: Request, { params }: { params: { slug: string } 
       "sandbox; default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'",
     );
   }
-  return html(buildSiteSrcDoc(site.type, site.content), 200);
+  // On its own origin (subdomain) → real-origin CSP (no sandbox). Legacy path
+  // serving (SITES_DOMAIN unset) keeps the opaque-origin sandbox.
+  return html(buildSiteSrcDoc(site.type, site.content), 200, viaSiteHost ? REAL_ORIGIN_CSP : OPAQUE_CSP);
 }

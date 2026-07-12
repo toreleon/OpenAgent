@@ -32,10 +32,35 @@ declare module "next-auth/jwt" {
 const githubEnabled =
   !!process.env.GITHUB_ID && !!process.env.GITHUB_SECRET;
 
+// When the app is served over https (prod), pin the session cookie as a
+// host-only `__Host-` cookie: the `__Host-` prefix REQUIRES Secure + Path=/ +
+// NO Domain, which the browser enforces. Over http (local dev) the prefix and
+// Secure are dropped so the cookie is still set. See the `cookies` block below.
+const useSecureCookies = (process.env.NEXTAUTH_URL ?? "").startsWith("https://");
+const sessionCookieName = `${useSecureCookies ? "__Host-" : ""}next-auth.session-token`;
+
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   session: {
     strategy: "jwt",
+  },
+  // SITE ORIGIN ISOLATION (Phase 0): published Sites are served on their own
+  // registrable domain (`<slug>.<SITES_DOMAIN>`), so the app's auth cookie must
+  // never be readable from a site origin. We pin it host-only — NO `Domain`
+  // attribute (so it is scoped to the exact app host, never sent to a subdomain
+  // of any shared parent) + SameSite=Lax + HttpOnly. Separate registrable domain
+  // is the primary boundary; this is defense-in-depth. NOTE: changing the cookie
+  // name invalidates existing sessions once (users re-login).
+  cookies: {
+    sessionToken: {
+      name: sessionCookieName,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
   },
   pages: {
     signIn: "/login",
