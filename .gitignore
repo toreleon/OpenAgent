@@ -4,6 +4,15 @@ out
 build
 dev.db
 dev.db-journal
+# Isolated Sites mini-app datastore (prisma/sites-data.prisma) + its generated
+# client. Second SQLite DB; never committed. See src/lib/sites/data-db.ts.
+sites-data.db
+sites-data.db-journal
+sites-data.db-shm
+sites-data.db-wal
+/src/generated
+# Per-Site uploaded files (src/lib/sites/blob.ts). Runtime data; never committed.
+/.sites-blob
 .env
 .env.local
 /uploads
