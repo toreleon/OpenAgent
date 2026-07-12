@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Boxes, FileText, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { artifactHasPreview } from "@/lib/types";
 import type { ArtifactLibraryItem, ArtifactType } from "@/lib/types";
+import { ArtifactRenderer } from "./ArtifactRenderer";
 
 const FILTER_OPTIONS: Array<{ value: "all" | ArtifactType; label: string }> = [
   { value: "all", label: "All artifacts" },
@@ -120,21 +122,45 @@ export function ArtifactLibrary() {
         ) : (
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visibleArtifacts.map((artifact) => {
-              const latestVersion = artifact.versions.at(-1)?.version ?? 1;
+              const latest = artifact.versions.at(-1);
+              const latestVersion = latest?.version ?? 1;
+              const hasPreview = artifactHasPreview(artifact.type);
+              const openArtifact = () =>
+                router.push(`/c/${artifact.conversationId}?artifact=${artifact.id}`);
               return (
-                <button
+                <article
                   key={artifact.id}
-                  type="button"
-                  onClick={() => router.push(`/c/${artifact.conversationId}?artifact=${artifact.id}`)}
-                  className="group overflow-hidden rounded-xl border border-border bg-sidebar text-left transition-colors hover:border-text-secondary/60 hover:bg-hover focus:outline-none focus:ring-2 focus:ring-accent"
+                  role="button"
+                  tabIndex={0}
+                  onClick={openArtifact}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openArtifact();
+                    }
+                  }}
+                  className="group cursor-pointer overflow-hidden rounded-xl border border-border bg-sidebar text-left transition-colors hover:border-text-secondary/60 hover:bg-hover focus:outline-none focus:ring-2 focus:ring-accent"
                 >
-                  <div className="h-36 overflow-hidden border-b border-border bg-[#171717] p-3">
-                    <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
-                      <FileText size={12} /> {artifact.type}
-                    </div>
-                    <p className="max-h-24 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-text-secondary">
-                      {previewFor(artifact)}
-                    </p>
+                  <div className="relative h-36 overflow-hidden border-b border-border bg-code-header">
+                    {latest && hasPreview ? (
+                      <div className="pointer-events-none h-full w-full">
+                        <ArtifactRenderer artifact={artifact} version={latest} mode="preview" />
+                      </div>
+                    ) : (
+                      <div className="h-full p-3">
+                        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                          <FileText size={12} /> {artifact.type}
+                        </div>
+                        <p className="max-h-24 overflow-hidden whitespace-pre-wrap text-xs leading-relaxed text-text-secondary">
+                          {previewFor(artifact)}
+                        </p>
+                      </div>
+                    )}
+                    {hasPreview && (
+                      <span className="pointer-events-none absolute left-2 top-2 rounded bg-main/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary backdrop-blur-sm">
+                        {artifact.type}
+                      </span>
+                    )}
                   </div>
                   <div className="p-3">
                     <h2 className="h-10 overflow-hidden text-sm font-medium leading-5 text-text-primary">
@@ -145,7 +171,7 @@ export function ArtifactLibrary() {
                     </p>
                     <p className="mt-3 text-xs text-text-secondary">{editedAt(artifact.updatedAt)}</p>
                   </div>
-                </button>
+                </article>
               );
             })}
           </div>
