@@ -112,7 +112,7 @@ export default function LoginForm({ githubEnabled }: LoginFormProps) {
         <button
           type="submit"
           disabled={busy}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
           {submitting ? "Signing in…" : "Sign in"}

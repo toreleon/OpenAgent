@@ -30,7 +30,7 @@ export function CodeArtifact({ content, language }: CodeArtifactProps) {
   }, [content, language]);
 
   return (
-    <div className="h-full w-full overflow-auto bg-[#0d0d0d]">
+    <div className="h-full w-full overflow-auto bg-code-bg">
       <pre className="min-h-full p-4 text-sm leading-relaxed">
         {highlighted !== null ? (
           <code

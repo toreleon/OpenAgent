@@ -18,6 +18,9 @@ const config: Config = {
         accent: "rgb(var(--color-accent) / <alpha-value>)",
         "accent-hover": "rgb(var(--color-accent-hover) / <alpha-value>)",
         hover: "rgb(var(--color-hover) / <alpha-value>)",
+        "code-bg": "rgb(var(--color-code-bg) / <alpha-value>)",
+        "code-header": "rgb(var(--color-code-header) / <alpha-value>)",
+        danger: "rgb(var(--color-danger) / <alpha-value>)",
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],

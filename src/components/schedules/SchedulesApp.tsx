@@ -113,13 +113,13 @@ export function SchedulesApp() {
         </header>
 
         {error && (
-          <div className="mx-auto mt-1 flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+          <div className="mx-auto mt-1 flex w-full max-w-3xl items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-danger">
             <span className="truncate">{error}</span>
             <button
               type="button"
               aria-label="Dismiss error"
               onClick={clearError}
-              className="shrink-0 text-red-300 hover:text-red-200"
+              className="shrink-0 text-danger transition-opacity hover:opacity-80"
             >
               <X size={16} />
             </button>

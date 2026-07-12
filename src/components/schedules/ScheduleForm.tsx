@@ -431,7 +431,7 @@ export function ScheduleForm({ open, schedule, template, onClose }: ScheduleForm
             )}
 
             {localError && (
-              <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-danger">
                 <AlertCircle size={15} className="shrink-0" />
                 <span className="min-w-0 flex-1">{localError}</span>
               </div>

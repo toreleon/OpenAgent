@@ -137,8 +137,10 @@ export function ThinkingBlock({
           <span
             className="animate-shimmer bg-clip-text font-medium text-transparent"
             style={{
+              // Theme-aware: base = muted secondary text, highlight = primary
+              // text. Flips with the theme so the sweep reads in light + dark.
               backgroundImage:
-                "linear-gradient(90deg,#a1a1aa 0%,#a1a1aa 35%,#ececec 50%,#a1a1aa 65%,#a1a1aa 100%)",
+                "linear-gradient(90deg,rgb(var(--color-text-secondary)) 0%,rgb(var(--color-text-secondary)) 35%,rgb(var(--color-text-primary)) 50%,rgb(var(--color-text-secondary)) 65%,rgb(var(--color-text-secondary)) 100%)",
               backgroundSize: "200% 100%",
               WebkitTextFillColor: "transparent",
             }}

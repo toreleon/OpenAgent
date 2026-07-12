@@ -68,8 +68,8 @@ function CodeBlock({
   const code = extractText(children).replace(/\n$/, "");
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-border bg-[#0d0d0d]">
-      <div className="flex items-center justify-between border-b border-border bg-[#171717] px-4 py-1.5">
+    <div className="my-4 overflow-hidden rounded-xl border border-border bg-code-bg">
+      <div className="flex items-center justify-between border-b border-border bg-code-header px-4 py-1.5">
         <span className="text-xs font-medium lowercase text-text-secondary">
           {language ?? "code"}
         </span>

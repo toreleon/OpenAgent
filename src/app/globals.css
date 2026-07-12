@@ -22,6 +22,9 @@
   --color-accent: 16 163 127; /* #10a37f */
   --color-accent-hover: 13 138 107;
   --color-hover: 42 42 42; /* #2a2a2a */
+  --color-code-bg: 13 13 13; /* #0d0d0d code-block body */
+  --color-code-header: 23 23 23; /* #171717 code-block header bar */
+  --color-danger: 248 113 113; /* #f87171 (red-400) error text on dark */
   --font-inter: "Inter", system-ui, sans-serif;
 }
 
@@ -42,6 +45,9 @@
   --color-text-primary: 13 13 13; /* #0d0d0d */
   --color-text-secondary: 108 108 118; /* muted slate */
   --color-hover: 236 236 236; /* #ececec */
+  --color-code-bg: 246 248 250; /* #f6f8fa GitHub-light code surface */
+  --color-code-header: 240 241 243; /* #f0f1f3 header bar */
+  --color-danger: 220 38 38; /* #dc2626 (red-600) legible error text on white */
 }
 
 html,
@@ -187,7 +193,7 @@ body {
 }
 
 .prose-chat pre {
-  background-color: #0d0d0d;
+  background-color: rgb(var(--color-code-bg));
   border-radius: 0.5rem;
   padding: 1rem;
   overflow-x: auto;
@@ -219,10 +225,12 @@ body {
   font-weight: 600;
 }
 
-/* Minimal hljs fallback colors for dark theme */
+/* Minimal hljs fallback colors for dark theme. The background is transparent so
+ * the surrounding container (a --color-code-bg surface) shows through and can
+ * flip between light/dark; only the token *colors* live here. */
 .hljs {
   color: #c9d1d9;
-  background: #0d0d0d;
+  background: transparent;
 }
 .hljs-keyword,
 .hljs-selector-tag,
@@ -244,4 +252,37 @@ body {
 .hljs-function,
 .hljs-title {
   color: #d2a8ff;
+}
+
+/*
+ * Light-mode syntax palette (GitHub-light). Scoped under `:root.light`, giving
+ * these rules specificity (0,2,0) — enough to win over BOTH the dark `.hljs*`
+ * rules above (0,1,0) AND the imported `github-dark.css` `.hljs*` (0,1,0)
+ * regardless of stylesheet order — so dark mode is untouched and the code
+ * surface (which uses --color-code-bg) becomes a light card with dark syntax.
+ */
+:root.light .hljs {
+  color: #24292f;
+  background: transparent;
+}
+:root.light .hljs-keyword,
+:root.light .hljs-selector-tag,
+:root.light .hljs-built_in {
+  color: #d73a49;
+}
+:root.light .hljs-string,
+:root.light .hljs-attr {
+  color: #032f62;
+}
+:root.light .hljs-number,
+:root.light .hljs-literal {
+  color: #005cc5;
+}
+:root.light .hljs-comment {
+  color: #6a737d;
+  font-style: italic;
+}
+:root.light .hljs-function,
+:root.light .hljs-title {
+  color: #6f42c1;
 }

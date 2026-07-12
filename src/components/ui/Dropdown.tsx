@@ -101,7 +101,7 @@ export function DropdownItem({
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-hover",
-        danger ? "text-red-400 hover:text-red-300" : "text-text-primary",
+        danger ? "text-danger" : "text-text-primary",
         active && "bg-hover",
         className,
       )}
