@@ -65,6 +65,15 @@ export type TraceItem =
 export interface ChatMessage {
   id: string;
   role: ChatRole;
+  /**
+   * Parent message id in the conversation TREE, or null for a root message.
+   * ChatGPT-style editing a user message / regenerating an assistant reply
+   * creates a NEW sibling under the same parent, so a parent's children are the
+   * selectable "versions". The visible conversation is the chain of parents from
+   * the conversation's active leaf up to a root. Absent on legacy in-flight
+   * shapes; the server always sends it for persisted messages.
+   */
+  parentId?: string | null;
   content: string;
   attachments?: Attachment[];
   toolCalls?: ToolCallRecord[];
@@ -96,12 +105,24 @@ export interface ChatMessage {
    */
   artifactRefs?: ArtifactRef[];
   /**
+   * Sites this (assistant) message built or deployed, in call order. Used to
+   * render inline "site chips" that open the Sites UI. Absent otherwise.
+   */
+  siteRefs?: SiteRef[];
+  /**
    * Deep-research state (assistant messages produced in Deep Research mode).
    * Holds the plan + live activity log rendered in the collapsible "Research"
    * block above the report. The report itself is this message's `content`.
    * Absent for normal chat turns.
    */
   research?: ResearchState;
+  /**
+   * Parallel-subagent state (assistant messages where the model called the
+   * `run_subagents` tool). Holds the live per-worker status log rendered in the
+   * collapsible "Subagents" block above the synthesized answer. Absent for turns
+   * that dispatched no subagents. See {@link SubagentState}.
+   */
+  subagents?: SubagentState;
   /** ISO 8601 timestamp. */
   createdAt: string;
 }
@@ -150,6 +171,57 @@ export interface ResearchState {
 }
 
 // ---------------------------------------------------------------------------
+// Parallel subagents (Claude-Desktop-style orchestrator → workers)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle of one dispatched subagent worker. */
+export type SubagentStatus = "running" | "done" | "failed";
+
+/**
+ * One worker in a parallel-subagent batch, rendered as a live row in the
+ * "Subagents" activity panel above the orchestrator's synthesized answer.
+ * Streamed updates REPLACE the entry with the same `id` (running → its live
+ * step notes → done|failed), so the id must be stable across the worker's
+ * lifecycle. Mirrors {@link ResearchActivity}'s upsert-by-id contract.
+ */
+export interface SubagentActivity {
+  /** Stable id for this worker within the batch, e.g. "sub-0". */
+  id: string;
+  /** The subtask title the orchestrator assigned this worker. */
+  title: string;
+  status: SubagentStatus;
+  /** Number of tool calls the worker has made so far (live counter). */
+  steps?: number;
+  /**
+   * A compact live/final note: the worker's current action while running
+   * (e.g. "Searching the web for …"), or a one-line result/error once settled.
+   */
+  detail?: string;
+}
+
+/**
+ * Accumulated parallel-subagent state, persisted (JSON) on the assistant
+ * message so the panel rehydrates after a reload. Mirrors {@link ResearchState}.
+ */
+export interface SubagentState {
+  /** Each dispatched worker, in dispatch order. */
+  agents: SubagentActivity[];
+}
+
+/**
+ * Canonical tool name for the parallel-subagent dispatcher. Shared so the tool
+ * definition, the /api/chat route (which suppresses this tool's generic "tool"
+ * card in favor of the rich Subagents panel), and any client agree on the exact
+ * string.
+ */
+export const SUBAGENT_TOOL_NAME = "run_subagents";
+
+/** True if `name` is the parallel-subagent dispatcher tool. */
+export function isSubagentToolName(name: string): boolean {
+  return name === SUBAGENT_TOOL_NAME;
+}
+
+// ---------------------------------------------------------------------------
 // Conversations & models
 // ---------------------------------------------------------------------------
 
@@ -168,7 +240,17 @@ export interface ConversationSummary {
 export interface ConversationDetail extends ConversationSummary {
   /** ISO 8601 timestamp. */
   createdAt: string;
+  /**
+   * The full message TREE (every branch), not just the visible path. The client
+   * derives the visible conversation as the chain of parents from
+   * {@link activeLeafId} up to a root, and pages sibling branches as "versions".
+   */
   messages: ChatMessage[];
+  /**
+   * Leaf of the currently-visible branch. Null only for an empty conversation.
+   * See {@link ChatMessage.parentId}.
+   */
+  activeLeafId: string | null;
   /** All artifacts produced in this conversation, each with full version history. */
   artifacts: Artifact[];
 }
@@ -278,6 +360,13 @@ export type StreamEvent =
   | { type: "tool_call"; name: string; args: unknown }
   | { type: "tool_result"; name: string; output: unknown }
   | { type: "message_id"; id: string }
+  /**
+   * Emitted once right after the server persists this turn's USER message (edit
+   * or normal send), carrying its real id + parent so the client can reconcile
+   * the optimistic user bubble and its parent pointer. Not emitted on a
+   * regenerate turn (which creates no new user message). See CONTRACTS.md.
+   */
+  | { type: "user_message"; id: string; parentId: string | null }
   | { type: "title"; title: string }
   /**
    * Emitted when the assistant creates/updates/rewrites an artifact (i.e. calls
@@ -285,6 +374,12 @@ export type StreamEvent =
    * client can open or refresh the artifact panel live. See CONTRACTS.md.
    */
   | { type: "artifact"; command: ArtifactCommand; artifact: ArtifactSnapshot }
+  /**
+   * Emitted when the assistant builds or deploys a Site (i.e. calls one of the
+   * site tools). Carries the current Site snapshot so the client can open or
+   * refresh the in-chat Site panel live. See CONTRACTS.md.
+   */
+  | { type: "site"; command: SiteCommand; site: SiteSnapshot }
   /** Deep Research: the plan, emitted once after planning completes. */
   | { type: "research_plan"; plan: ResearchPlan }
   /**
@@ -293,6 +388,14 @@ export type StreamEvent =
    * `activity.id` REPLACES the prior one; a new id appends.
    */
   | { type: "research_activity"; activity: ResearchActivity }
+  /**
+   * Parallel subagents: a live status update for one dispatched worker. An
+   * update with an existing `activity.id` REPLACES the prior one (running →
+   * done|failed); a new id appends. Emitted from INSIDE the `run_subagents`
+   * tool via the RunContext `onEvent` side channel (see src/lib/agent.ts and
+   * src/lib/subagents/runner.ts), not by the SDK event loop.
+   */
+  | { type: "subagent_activity"; activity: SubagentActivity }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -331,6 +434,26 @@ export interface ChatRequest {
    * omitted; the server coerces unsupported values to DEFAULT_EFFORT.
    */
   effort?: ReasoningEffort;
+  /**
+   * The message this turn attaches under in the conversation TREE (see
+   * {@link ChatMessage.parentId}):
+   *  - Normal send: the current active leaf (or null / omitted for the first
+   *    message). The new user message becomes a child of it.
+   *  - Edit: the parent of the user message being edited — so the new (edited)
+   *    user message is a SIBLING version of the original.
+   *  - Regenerate ({@link regenerate} = true): the USER message to re-answer;
+   *    the fresh assistant reply becomes a sibling version of the prior one.
+   * When omitted the server defaults to the conversation's active leaf (then the
+   * most recent message, for legacy chats without one).
+   */
+  parentId?: string | null;
+  /**
+   * When true, re-answer an existing user message: no new user message is
+   * created; a fresh assistant reply is added as a sibling under
+   * {@link parentId} (which must name a user message in this conversation). The
+   * `message` field is ignored — the existing user turn's text is reused.
+   */
+  regenerate?: boolean;
 }
 
 /** Request body for POST /api/register. */
@@ -358,6 +481,12 @@ export interface CreateConversationRequest {
 export interface UpdateConversationRequest {
   title?: string;
   projectId?: string | null;
+  /**
+   * Switch the visible branch by pointing at a new leaf message (must belong to
+   * this conversation). Set when the user pages between edit/regenerate versions
+   * so the choice survives a reload. See {@link ChatMessage.parentId}.
+   */
+  activeLeafId?: string;
 }
 
 /** Response body for POST /api/upload. */
@@ -571,6 +700,210 @@ export interface ArtifactSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Sites (ChatGPT-Sites-style publishable web pages)
+// ---------------------------------------------------------------------------
+
+/**
+ * The content kinds a Site can render. This is the artifact preview set MINUS
+ * "code" (a Site is a rendered page, not source). `image` is reachable only via
+ * publish-from-artifact; the model builds sites with SITE_BUILDABLE_TYPES.
+ */
+export type SiteType = "html" | "markdown" | "svg" | "image" | "mermaid" | "react";
+
+/** All site content types, in display order. */
+export const SITE_TYPES: SiteType[] = [
+  "html",
+  "markdown",
+  "svg",
+  "image",
+  "mermaid",
+  "react",
+];
+
+/** True if `v` is a valid SiteType. */
+export function isSiteType(v: unknown): v is SiteType {
+  return typeof v === "string" && (SITE_TYPES as string[]).includes(v);
+}
+
+/** Site types the model can build via `create_site` (image is publish-only). */
+export const SITE_BUILDABLE_TYPES = [
+  "html",
+  "react",
+  "markdown",
+  "svg",
+  "mermaid",
+] as const;
+
+/** Who can visit a deployed Site. `workspace` serving is deferred (v1: private+link). */
+export type SiteVisibility = "private" | "link" | "workspace";
+
+/** All visibility levels, in escalating-openness order. */
+export const SITE_VISIBILITIES: SiteVisibility[] = ["private", "link", "workspace"];
+
+/**
+ * Derived lifecycle status of a Site:
+ *  - "draft"          — never deployed (no live URL yet)
+ *  - "deployed"       — live, and the live version matches the current draft
+ *  - "deployed-stale" — live, but the draft has changed since the deploy
+ *                       ("You have undeployed changes")
+ */
+export type SiteStatus = "draft" | "deployed" | "deployed-stale";
+
+/** What a site tool call did. */
+export type SiteCommand = "create" | "update" | "deploy";
+
+/**
+ * Canonical site tool names. Shared so the tool definitions, the /api/chat
+ * route (which intercepts these calls), and the client all agree on the strings.
+ */
+export const SITE_TOOL_NAMES = {
+  create: "create_site",
+  update: "update_site",
+  deploy: "deploy_site",
+} as const;
+
+/** True if `name` is one of the site tool names. */
+export function isSiteToolName(name: string): boolean {
+  return (
+    name === SITE_TOOL_NAMES.create ||
+    name === SITE_TOOL_NAMES.update ||
+    name === SITE_TOOL_NAMES.deploy
+  );
+}
+
+/** The same-origin public path for a Site's live page, e.g. "/s/my-site-ab12cd". */
+export function sitePublicPath(slug: string): string {
+  return `/s/${slug}`;
+}
+
+/** One immutable saved version of a Site. */
+export interface SiteVersionInfo {
+  id: string;
+  /** 1-based; increments on every Save-a-Version. */
+  version: number;
+  type: SiteType;
+  title: string;
+  /** sha256(content) prefix — the pseudo git commit. */
+  commit: string;
+  /** Optional human label. */
+  label?: string;
+  createdAt: string;
+  /** True if this is the currently deployed (live) version. */
+  isLive: boolean;
+}
+
+/** A Site in list/card form (no full draft content). */
+export interface SiteSummary {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  visibility: SiteVisibility;
+  status: SiteStatus;
+  /** Path to the live public page, e.g. "/s/my-site-ab12cd". */
+  publicPath: string;
+  /** Type used to render the card thumbnail (live version's type, else draft). */
+  previewType: SiteType;
+  /** Content used to render the card thumbnail (live version, else draft). */
+  previewContent: string;
+  /** Language hint for the preview; usually absent. */
+  previewLanguage?: string;
+  /** Version number currently live, or null if never deployed. */
+  liveVersion: number | null;
+  versionCount: number;
+  createdAt: string;
+  updatedAt: string;
+  /** ISO 8601 timestamp of the last deploy, if any. */
+  deployedAt?: string;
+}
+
+/** Full Site detail including the editable draft + version history. */
+export interface SiteDetail extends SiteSummary {
+  draftType: SiteType;
+  draftContent: string;
+  draftLanguage?: string;
+  liveVersionId: string | null;
+  versions: SiteVersionInfo[];
+  /** "tool" | "artifact" | "manual". */
+  sourceType: string;
+  createdInConversationId?: string;
+  sourceArtifactId?: string;
+}
+
+/**
+ * Lightweight reference recorded on the assistant message that built/deployed a
+ * Site, used to render an inline chip that opens the Sites UI.
+ */
+export interface SiteRef {
+  siteId: string;
+  slug: string;
+  name: string;
+  command: SiteCommand;
+  /** True when this message deployed the site to its live URL. */
+  deployed: boolean;
+  publicPath: string;
+}
+
+/**
+ * Payload of a `site` stream event: enough for the client to open/refresh the
+ * in-chat Site panel and preview the current draft immediately.
+ */
+export interface SiteSnapshot {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  visibility: SiteVisibility;
+  status: SiteStatus;
+  command: SiteCommand;
+  draftType: SiteType;
+  draftContent: string;
+  draftLanguage?: string;
+  liveVersion: number | null;
+  publicPath: string;
+  /** True when the site currently has a live deployment. */
+  deployed: boolean;
+  updatedAt: string;
+}
+
+/**
+ * Request body for POST /api/sites. Either seed from an existing artifact
+ * (`fromArtifactId`) or provide `type` + `content` for a fresh site.
+ */
+export interface CreateSiteRequest {
+  name?: string;
+  /** Seed the site's draft from this artifact's latest version. */
+  fromArtifactId?: string;
+  /** For a fresh site: the content type. */
+  type?: SiteType;
+  content?: string;
+  language?: string | null;
+  description?: string | null;
+  visibility?: SiteVisibility;
+}
+
+/** Request body for PATCH /api/sites/[id] — any subset of editable fields. */
+export interface UpdateSiteRequest {
+  name?: string;
+  description?: string | null;
+  visibility?: SiteVisibility;
+  draftContent?: string;
+  draftType?: SiteType;
+  draftLanguage?: string | null;
+}
+
+/** Request body for POST /api/sites/[id]/versions. */
+export interface SaveSiteVersionRequest {
+  label?: string | null;
+}
+
+/** Request body for POST /api/sites/[id]/deploy. */
+export interface DeploySiteRequest {
+  /** Specific saved version to deploy; defaults to the current draft (snapshotted). */
+  versionId?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Component prop contracts
 // ---------------------------------------------------------------------------
 
@@ -718,6 +1051,26 @@ export interface CronTriggerResult {
 // Projects (ChatGPT/Claude-style workspaces)
 // ---------------------------------------------------------------------------
 
+/** Semantic icon choices offered when creating or editing a project. */
+export const PROJECT_ICON_NAMES = [
+  "folder",
+  "briefcase",
+  "code",
+  "book",
+  "graduation",
+  "lightbulb",
+  "rocket",
+  "palette",
+  "chart",
+  "heart",
+] as const;
+
+export type ProjectIconName = (typeof PROJECT_ICON_NAMES)[number];
+
+export function isProjectIconName(value: unknown): value is ProjectIconName {
+  return typeof value === "string" && (PROJECT_ICON_NAMES as readonly string[]).includes(value);
+}
+
 /**
  * A Project groups conversations around a shared purpose. Its custom
  * `instructions` and attached knowledge files are injected into the system
@@ -726,6 +1079,8 @@ export interface CronTriggerResult {
 export interface ProjectSummary {
   id: string;
   name: string;
+  /** User-selected semantic project icon. */
+  icon: ProjectIconName;
   /** Optional short summary shown on the project card; null when unset. */
   description: string | null;
   /** Custom instructions injected into every chat's system prompt; null when unset. */
@@ -773,6 +1128,8 @@ export interface ProjectDetail extends ProjectSummary {
 export interface CreateProjectRequest {
   /** Project name. Required, non-empty. */
   name: string;
+  /** Optional semantic project icon; defaults to folder. */
+  icon?: ProjectIconName;
   /** Optional short description. */
   description?: string;
   /** Optional custom instructions. */
@@ -782,6 +1139,7 @@ export interface CreateProjectRequest {
 /** Request body for PATCH /api/projects/[id]. All fields optional (edit-in-place). */
 export interface UpdateProjectRequest {
   name?: string;
+  icon?: ProjectIconName;
   description?: string | null;
   instructions?: string | null;
 }

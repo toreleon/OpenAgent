@@ -14,14 +14,18 @@ import {
   applyArtifactCommand,
   toolNameToArtifactCommand,
 } from "@/lib/artifacts";
+import { applySiteCommand, toolNameToSiteCommand } from "@/lib/sites";
 import {
   MODELS,
   DEFAULT_MODEL,
   REASONING_EFFORTS,
   DEFAULT_EFFORT,
   isArtifactToolName,
+  isSiteToolName,
+  isSubagentToolName,
   type ApiError,
   type ArtifactRef,
+  type SiteRef,
   type Attachment,
   type ChatMessage,
   type ChatRequest,
@@ -31,6 +35,8 @@ import {
   type ResearchPlan,
   type ResearchState,
   type StreamEvent,
+  type SubagentActivity,
+  type SubagentState,
   type ToolCallRecord,
   type TraceItem,
 } from "@/lib/types";
@@ -85,6 +91,43 @@ function decodeResearch(value: string | null): ResearchState | undefined {
   }
 }
 
+/** Decode the JSON-string `subagents` column into SubagentState, tolerating bad data. */
+function decodeSubagents(value: string | null): SubagentState | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as SubagentState).agents) &&
+      (parsed as SubagentState).agents.length > 0
+    ) {
+      return parsed as SubagentState;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Encode accumulated parallel-subagent activity for storage, or null when none ran. */
+function encodeSubagents(agents: SubagentActivity[]): string | null {
+  if (agents.length === 0) return null;
+  return JSON.stringify({ agents } satisfies SubagentState);
+}
+
+/**
+ * Before persisting, mark any subagent still "running" as "failed": the stream
+ * ended before that worker reported a terminal status, so it should rehydrate as
+ * failed rather than a spinner that never resolves on reload. Mirrors
+ * {@link finalizeTimeline}.
+ */
+function finalizeSubagents(agents: SubagentActivity[]): void {
+  for (const a of agents) {
+    if (a.status === "running") a.status = "failed";
+  }
+}
+
 /** Build a short, clean title from the first user message. */
 function deriveTitle(message: string): string {
   const cleaned = message.replace(/\s+/g, " ").trim();
@@ -113,8 +156,25 @@ export async function POST(req: Request) {
     });
   }
 
+  // Branching: `regenerate` re-answers an existing user message (no new user
+  // turn); `parentId` picks the branch this turn attaches under. `requestedParentId`
+  // is undefined when omitted (server picks a default), null for an explicit root,
+  // or a message id (validated against this conversation below).
+  const isRegenerate = body.regenerate === true;
+  // Distinguish an EXPLICIT null (root — e.g. editing the first user message)
+  // from an omitted/invalid value (undefined → use the server default). A
+  // non-empty string is a candidate parent id, validated against the tree below.
+  const requestedParentId: string | null | undefined =
+    body.parentId === null
+      ? null
+      : typeof body.parentId === "string" && body.parentId
+        ? body.parentId
+        : undefined;
+
   const rawMessage = typeof body?.message === "string" ? body.message.trim() : "";
-  if (!rawMessage) {
+  // A regenerate reuses an existing user turn's text (loaded from parentId
+  // below), so it carries no message body; every other turn requires one.
+  if (!isRegenerate && !rawMessage) {
     return Response.json(
       { error: "message is required" } satisfies ApiError,
       { status: 400 },
@@ -127,7 +187,7 @@ export async function POST(req: Request) {
   // gets persisted, searched, titled, and shown in the user bubble. (The legacy
   // `body.deepResearch` flag still works, and a clarify turn auto-continues to
   // the report phase below.)
-  const builtin = matchBuiltinCommand(rawMessage);
+  const builtin = isRegenerate ? null : matchBuiltinCommand(rawMessage);
   const isDeepResearchCommand = builtin?.command.name === DEEP_RESEARCH_COMMAND;
   if (isDeepResearchCommand && !builtin!.rest) {
     return Response.json(
@@ -138,8 +198,9 @@ export async function POST(req: Request) {
     );
   }
   // For a /deep-research command the argument IS the message (guaranteed
-  // non-empty above); otherwise the raw message stands.
-  const message = isDeepResearchCommand ? builtin!.rest : rawMessage;
+  // non-empty above); otherwise the raw message stands. Reassigned to the
+  // re-answered user turn's text for a regenerate (see below).
+  let message = isDeepResearchCommand ? builtin!.rest : rawMessage;
 
   // The effective model is resolved server-side (OPENAI_MODEL in .env wins, see
   // src/lib/agent.ts), so we never reject an unknown/stale client model — that
@@ -175,11 +236,18 @@ export async function POST(req: Request) {
   let conversationTitle: string;
   let conversationModel: string;
   let conversationProjectId: string | null;
+  let conversationActiveLeafId: string | null;
 
   if (body.conversationId) {
     const convo = await prisma.conversation.findFirst({
       where: { id: body.conversationId, userId },
-      select: { id: true, title: true, model: true, projectId: true },
+      select: {
+        id: true,
+        title: true,
+        model: true,
+        projectId: true,
+        activeLeafId: true,
+      },
     });
     if (!convo) {
       return Response.json({ error: "Not found" } satisfies ApiError, {
@@ -190,6 +258,7 @@ export async function POST(req: Request) {
     conversationTitle = convo.title;
     conversationModel = convo.model;
     conversationProjectId = convo.projectId;
+    conversationActiveLeafId = convo.activeLeafId;
   } else {
     // New conversation: honor an optional projectId, but only when it names a
     // project this user owns. An unknown/unowned id is silently ignored so a
@@ -204,12 +273,19 @@ export async function POST(req: Request) {
     }
     const created = await prisma.conversation.create({
       data: { title: "New chat", model, userId, projectId },
-      select: { id: true, title: true, model: true, projectId: true },
+      select: {
+        id: true,
+        title: true,
+        model: true,
+        projectId: true,
+        activeLeafId: true,
+      },
     });
     conversationId = created.id;
     conversationTitle = created.title;
     conversationModel = created.model;
     conversationProjectId = created.projectId;
+    conversationActiveLeafId = created.activeLeafId;
     isNewConversation = true;
   }
 
@@ -245,26 +321,120 @@ export async function POST(req: Request) {
         .join("\n\n")
     : baseSkillsContext;
 
-  // ---- Load prior history (before persisting the new user turn) ----
-  const priorMessages = await prisma.message.findMany({
+  // ---- Resolve the branch parent + load its history path ----
+  // Every message lives in a TREE (Message.parentId). This turn extends ONE
+  // branch: `branchParentId` is the message the new turn attaches under — the
+  // current active leaf for a normal send, the edited user message's parent for
+  // an edit, or the user message being re-answered for a regenerate. The model's
+  // context is the chain of parents from `branchParentId` up to a root, NOT every
+  // message in the conversation (that would leak sibling branches).
+  const allMessages = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: "asc" },
   });
+  const messageById = new Map(allMessages.map((m) => [m.id, m]));
 
-  const history: ChatMessage[] = priorMessages.map((m) => ({
+  // Where to attach this turn. The default (for an omitted parentId) is the
+  // stored active leaf, then the most recent message (legacy chats), then null
+  // (first turn / empty conversation).
+  const defaultParentId: string | null =
+    (conversationActiveLeafId && messageById.has(conversationActiveLeafId)
+      ? conversationActiveLeafId
+      : allMessages[allMessages.length - 1]?.id) ?? null;
+  let branchParentId: string | null;
+  if (requestedParentId === null) {
+    // Explicit root (e.g. editing the very first user message).
+    branchParentId = null;
+  } else if (typeof requestedParentId === "string") {
+    // A valid in-conversation id extends that branch. An unknown/stale id — e.g.
+    // an unreconciled temp id left behind by a Stopped/failed turn — falls back
+    // to the active leaf rather than silently starting a DETACHED root that would
+    // drop all prior history from the model context and the visible path.
+    branchParentId = messageById.has(requestedParentId)
+      ? requestedParentId
+      : defaultParentId;
+  } else {
+    // Omitted → continue the active branch.
+    branchParentId = defaultParentId;
+  }
+
+  // Walk parent pointers from branchParentId up to a root (guard against cycles).
+  const pathRecords: typeof allMessages = [];
+  {
+    const seen = new Set<string>();
+    let cursor: string | null = branchParentId;
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      const rec = messageById.get(cursor);
+      if (!rec) break;
+      pathRecords.unshift(rec);
+      cursor = rec.parentId;
+    }
+  }
+
+  const pathHistory: ChatMessage[] = pathRecords.map((m) => ({
     id: m.id,
     role: m.role as ChatRole,
+    parentId: m.parentId ?? null,
     content: m.content,
     attachments: decodeJsonArray<Attachment>(m.attachments),
     toolCalls: decodeJsonArray<ToolCallRecord>(m.toolCalls),
     research: decodeResearch(m.research),
+    subagents: decodeSubagents(m.subagents),
     createdAt: m.createdAt.toISOString(),
   }));
 
+  // ---- Establish the user turn (existing on regenerate, fresh otherwise) ----
+  // For a regenerate the "new" user turn is the existing message at the branch
+  // tip; `history` is everything before it. Otherwise we persist a fresh user
+  // message as a child of branchParentId and its whole path is the history.
+  let history: ChatMessage[];
+  let userMessage: ChatMessage;
+  // Real id of the user message created THIS request (null on regenerate), sent
+  // to the client via a `user_message` event so it can reconcile the optimistic
+  // bubble. The assistant message hangs off this id.
+  let createdUserMessageId: string | null = null;
+
+  if (isRegenerate) {
+    const parentRec = branchParentId ? messageById.get(branchParentId) : undefined;
+    if (!parentRec || parentRec.role !== "user") {
+      return Response.json(
+        {
+          error: "regenerate requires parentId to name a user message",
+        } satisfies ApiError,
+        { status: 400 },
+      );
+    }
+    userMessage = pathHistory[pathHistory.length - 1];
+    history = pathHistory.slice(0, -1);
+    message = parentRec.content;
+  } else {
+    const userRecord = await prisma.message.create({
+      data: {
+        conversationId,
+        parentId: branchParentId,
+        role: "user",
+        content: message,
+        attachments: encodeJsonArray(attachments),
+        toolCalls: null,
+      },
+    });
+    createdUserMessageId = userRecord.id;
+    userMessage = {
+      id: userRecord.id,
+      role: "user",
+      parentId: branchParentId,
+      content: message,
+      attachments: attachments.length ? attachments : undefined,
+      createdAt: userRecord.createdAt.toISOString(),
+    };
+    history = pathHistory;
+  }
+
   // ---- Deep Research phase detection ----
-  // Look at the most recent assistant turn: if it asked clarifying questions,
-  // this turn (the user's answers) runs the full research pipeline; otherwise a
-  // fresh Deep Research turn asks the clarifying questions first.
+  // Look at the most recent assistant turn on this branch: if it asked
+  // clarifying questions, this turn (the user's answers) runs the full research
+  // pipeline; otherwise a fresh Deep Research turn asks the questions first.
   const lastAssistant = [...history]
     .reverse()
     .find((m) => m.role === "assistant");
@@ -273,8 +443,9 @@ export async function POST(req: Request) {
   // command. But only for a plain answer: a follow-up that is itself a slash
   // command (a fresh `/deep-research`, or any `/skill`) must NOT be swallowed
   // into the research pipeline — it takes precedence (resolveSlashSkill above
-  // already resolved a skill for it).
+  // already resolved a skill for it). A regenerate never auto-continues research.
   if (
+    !isRegenerate &&
     !rawMessage.startsWith("/") &&
     lastAssistant?.research?.phase === "clarifying"
   ) {
@@ -293,30 +464,13 @@ export async function POST(req: Request) {
     (isNewConversation || conversationTitle === "New chat") &&
     history.length === 0;
 
-  // ---- Persist the user message ----
-  const userRecord = await prisma.message.create({
-    data: {
-      conversationId,
-      role: "user",
-      content: message,
-      attachments: encodeJsonArray(attachments),
-      toolCalls: null,
-    },
-  });
-
-  const userMessage: ChatMessage = {
-    id: userRecord.id,
-    role: "user",
-    content: message,
-    attachments: attachments.length ? attachments : undefined,
-    createdAt: userRecord.createdAt.toISOString(),
-  };
-
-  // Pre-create the assistant message row so we can stream its id immediately
-  // and update it on completion.
+  // Pre-create the assistant message row so we can stream its id immediately and
+  // update it on completion. It hangs off the user turn (regenerate: a sibling
+  // reply under the same user message; otherwise the freshly-created user turn).
   const assistantRecord = await prisma.message.create({
     data: {
       conversationId,
+      parentId: userMessage.id,
       role: "assistant",
       content: "",
       attachments: null,
@@ -338,12 +492,25 @@ export async function POST(req: Request) {
       // persisted as `timeline` so it rehydrates in original order after reload.
       const timeline: TraceItem[] = [];
       const artifactRefs: ArtifactRef[] = [];
+      const siteRefs: SiteRef[] = [];
       let toolSeq = 0;
       let sawError = false;
       // True once an artifact command was ATTEMPTED (even if it failed), so the
       // empty-reply retry doesn't misread a failed artifact turn as "nothing
       // happened" and re-run (which would just re-attempt the failing artifact).
       let artifactAttempted = false;
+      // Same guard for site tool calls (a turn that only built/deployed a Site).
+      let siteAttempted = false;
+      // The user's auto-deploy opt-in, fetched lazily on the first deploy_site
+      // call (avoids a query on turns that never touch sites).
+      let sitesAutoDeploy: boolean | null = null;
+      // Live parallel-subagent activity, upserted by id as the run_subagents tool
+      // streams `subagent_activity` via the streamChat onEvent side channel;
+      // persisted as the `subagents` column so the panel rehydrates on reload.
+      const subagentActivities: SubagentActivity[] = [];
+      // True once run_subagents was ATTEMPTED, so the empty-reply retry doesn't
+      // re-dispatch subagents (mirrors artifactAttempted/siteAttempted).
+      let subagentAttempted = false;
       // JSON-encoded ResearchState for Deep Research turns; null for normal chat.
       let researchColumn: string | null = null;
 
@@ -352,12 +519,43 @@ export async function POST(req: Request) {
       const startedAt = Date.now();
 
       const send = (event: StreamEvent) => {
-        controller.enqueue(sse(event));
+        try {
+          controller.enqueue(sse(event));
+        } catch {
+          // The client disconnected (tab closed / Stop / navigation): enqueueing
+          // on a cancelled controller throws. Degrade to a no-op so a still-live
+          // background emitter — notably a run_subagents worker pushing progress
+          // via onEvent — can never throw out of its tool's execute.
+        }
+      };
+
+      // The run_subagents tool pushes `subagent_activity` events from inside its
+      // execute via the streamChat `onEvent` side channel. Upsert by stable id
+      // and forward to the client, mirroring the research_activity handling — and
+      // ignore any other event kind defensively.
+      const handleSubagentEvent = (event: StreamEvent) => {
+        if (event.type !== "subagent_activity") return;
+        subagentAttempted = true;
+        const idx = subagentActivities.findIndex(
+          (a) => a.id === event.activity.id,
+        );
+        if (idx >= 0) subagentActivities[idx] = event.activity;
+        else subagentActivities.push(event.activity);
+        send(event);
       };
 
       try {
-        // 1) message_id near the start.
+        // 1) message_id near the start. On a fresh (non-regenerate) turn also
+        // announce the persisted user message's id + parent so the client can
+        // reconcile its optimistic user bubble into the message tree.
         send({ type: "message_id", id: assistantMessageId });
+        if (createdUserMessageId) {
+          send({
+            type: "user_message",
+            id: createdUserMessageId,
+            parentId: branchParentId,
+          });
+        }
 
         // 2..4) stream agent output. Deep Research branches into its own
         // pipeline (clarify questions, then the full research + report); normal
@@ -493,6 +691,7 @@ export async function POST(req: Request) {
           userId,
           projectContext,
           skillsContext,
+          onEvent: handleSubagentEvent,
         })) {
           switch (event.type) {
             case "reasoning_delta": {
@@ -556,6 +755,51 @@ export async function POST(req: Request) {
                 }
                 break;
               }
+              // Site tool calls are intercepted the same way: persist via
+              // applySiteCommand and emit a dedicated `site` event that drives
+              // the in-chat Site panel, instead of a generic tool card.
+              const siteCommand = toolNameToSiteCommand(event.name);
+              if (siteCommand) {
+                siteAttempted = true;
+                try {
+                  let canDeploy = false;
+                  if (siteCommand === "deploy") {
+                    if (sitesAutoDeploy === null) {
+                      const u = await prisma.user.findUnique({
+                        where: { id: userId },
+                        select: { sitesAutoDeploy: true },
+                      });
+                      sitesAutoDeploy = u?.sitesAutoDeploy ?? false;
+                    }
+                    canDeploy = sitesAutoDeploy;
+                  }
+                  const result = await applySiteCommand(prisma, {
+                    userId,
+                    conversationId,
+                    messageId: assistantMessageId,
+                    command: siteCommand,
+                    args: event.args,
+                    canDeploy,
+                  });
+                  if (result.ok) {
+                    siteRefs.push(result.ref);
+                    send({ type: "site", command: siteCommand, site: result.snapshot });
+                  } else {
+                    console.error("[chat] site command failed:", result.error);
+                  }
+                } catch (err) {
+                  console.error("[chat] site persistence error:", err);
+                }
+                break;
+              }
+              // run_subagents is intercepted too: its live progress renders as
+              // the dedicated "Subagents" panel (driven by `subagent_activity`
+              // events already forwarded via onEvent), so suppress the generic
+              // tool card here. The model still receives the tool's digest result.
+              if (isSubagentToolName(event.name)) {
+                subagentAttempted = true;
+                break;
+              }
               const recordId = `tool_${toolSeq++}`;
               toolCalls.push({
                 id: recordId,
@@ -573,8 +817,15 @@ export async function POST(req: Request) {
               break;
             }
             case "tool_result": {
-              // Artifact tools have no visible "tool" card, so skip their results.
-              if (isArtifactToolName(event.name)) break;
+              // Artifact + site + subagent tools have no visible "tool" card, so
+              // skip their results (handled in the tool_call branch above / via
+              // the subagent panel).
+              if (
+                isArtifactToolName(event.name) ||
+                isSiteToolName(event.name) ||
+                isSubagentToolName(event.name)
+              )
+                break;
               // Attach output to the most recent matching call record.
               for (let i = toolCalls.length - 1; i >= 0; i--) {
                 if (
@@ -617,7 +868,10 @@ export async function POST(req: Request) {
           assembled.trim() === "" &&
           toolCalls.length === 0 &&
           artifactRefs.length === 0 &&
-          !artifactAttempted
+          !artifactAttempted &&
+          siteRefs.length === 0 &&
+          !siteAttempted &&
+          !subagentAttempted
         ) {
           // Attempt 1 produced nothing meaningful; drop any stray whitespace it
           // streamed so the retry's answer is the sole persisted content.
@@ -633,6 +887,7 @@ export async function POST(req: Request) {
 
         // ---- Persist final assistant message + bump conversation ----
         finalizeTimeline(timeline);
+        finalizeSubagents(subagentActivities);
         await prisma.message.update({
           where: { id: assistantMessageId },
           data: {
@@ -642,12 +897,21 @@ export async function POST(req: Request) {
             reasoning: reasoning.length > 0 ? reasoning : null,
             reasoningMs,
             artifactRefs: encodeJsonArray(artifactRefs),
+            siteRefs: encodeJsonArray(siteRefs),
             research: researchColumn,
+            subagents: encodeSubagents(subagentActivities),
           },
         });
 
-        const convoData: { updatedAt: Date; title?: string } = {
+        // Point the conversation's active leaf at this reply so the freshly
+        // extended branch is what rehydrates on reload.
+        const convoData: {
+          updatedAt: Date;
+          title?: string;
+          activeLeafId: string;
+        } = {
           updatedAt: new Date(),
+          activeLeafId: assistantMessageId,
         };
         if (newTitle) convoData.title = newTitle;
         await prisma.conversation.update({
@@ -671,6 +935,7 @@ export async function POST(req: Request) {
         // mid-flight when the run threw rehydrates as errored, not spinning).
         try {
           finalizeTimeline(timeline);
+          finalizeSubagents(subagentActivities);
           await prisma.message.update({
             where: { id: assistantMessageId },
             data: {
@@ -680,12 +945,14 @@ export async function POST(req: Request) {
               reasoning: reasoning.length > 0 ? reasoning : null,
               reasoningMs,
               artifactRefs: encodeJsonArray(artifactRefs),
+              siteRefs: encodeJsonArray(siteRefs),
               research: researchColumn,
+              subagents: encodeSubagents(subagentActivities),
             },
           });
           await prisma.conversation.update({
             where: { id: conversationId },
-            data: { updatedAt: new Date() },
+            data: { updatedAt: new Date(), activeLeafId: assistantMessageId },
           });
         } catch {
           // best-effort persistence

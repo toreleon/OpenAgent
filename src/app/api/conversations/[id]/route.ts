@@ -12,6 +12,8 @@ import {
   type ConversationDetail,
   type ConversationSummary,
   type ResearchState,
+  type SiteRef,
+  type SubagentState,
   type ToolCallRecord,
   type TraceItem,
   type UpdateConversationRequest,
@@ -48,6 +50,22 @@ function decodeResearch(value: string | null): ResearchState | undefined {
   }
 }
 
+/** Decode the parallel-subagents JSON column so the panel rehydrates on reload. */
+function decodeSubagents(value: string | null): SubagentState | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as SubagentState;
+    return parsed &&
+      typeof parsed === "object" &&
+      Array.isArray(parsed.agents) &&
+      parsed.agents.length > 0
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** GET /api/conversations/[id] — full conversation with messages (oldest first). */
 export async function GET(_req: Request, { params }: RouteParams) {
   const session = await getServerSession(authOptions);
@@ -74,6 +92,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
   const messages: ChatMessage[] = conversation.messages.map((m) => ({
     id: m.id,
     role: m.role as ChatRole,
+    parentId: m.parentId ?? null,
     content: m.content,
     attachments: decodeJsonArray<Attachment>(m.attachments),
     toolCalls: decodeJsonArray<ToolCallRecord>(m.toolCalls),
@@ -83,7 +102,9 @@ export async function GET(_req: Request, { params }: RouteParams) {
     reasoningMs: m.reasoningMs ?? undefined,
     timeline: decodeJsonArray<TraceItem>(m.timeline),
     artifactRefs: decodeJsonArray<ArtifactRef>(m.artifactRefs),
+    siteRefs: decodeJsonArray<SiteRef>(m.siteRefs),
     research: decodeResearch(m.research),
+    subagents: decodeSubagents(m.subagents),
     createdAt: m.createdAt.toISOString(),
   }));
 
@@ -97,6 +118,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
     messages,
+    activeLeafId: conversation.activeLeafId ?? null,
     artifacts,
   };
 
@@ -126,7 +148,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     });
   }
 
-  const data: { title?: string; projectId?: string | null } = {};
+  const data: {
+    title?: string;
+    projectId?: string | null;
+    activeLeafId?: string;
+  } = {};
 
   // Rename: when `title` is present it must be a non-empty string.
   if (body.title !== undefined) {
@@ -164,9 +190,30 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
-  if (data.title === undefined && data.projectId === undefined) {
+  // Branch switch: `activeLeafId` must name a message in this conversation
+  // (validated below, after the ownership check, so we never leak existence).
+  const switchLeafId =
+    body.activeLeafId !== undefined
+      ? typeof body.activeLeafId === "string" && body.activeLeafId
+        ? body.activeLeafId
+        : null
+      : undefined;
+  if (switchLeafId === null) {
     return Response.json(
-      { error: "Provide a title and/or projectId to update" } satisfies ApiError,
+      { error: "activeLeafId must be a non-empty message id" } satisfies ApiError,
+      { status: 400 },
+    );
+  }
+
+  if (
+    data.title === undefined &&
+    data.projectId === undefined &&
+    switchLeafId === undefined
+  ) {
+    return Response.json(
+      {
+        error: "Provide a title, projectId, and/or activeLeafId to update",
+      } satisfies ApiError,
       { status: 400 },
     );
   }
@@ -182,9 +229,38 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     });
   }
 
-  const updated = await prisma.conversation.update({
+  // Verify the target leaf belongs to this conversation before pointing at it.
+  if (switchLeafId !== undefined) {
+    const leaf = await prisma.message.findFirst({
+      where: { id: switchLeafId, conversationId: params.id },
+      select: { id: true },
+    });
+    if (!leaf) {
+      return Response.json({ error: "Not found" } satisfies ApiError, {
+        status: 404,
+      });
+    }
+    data.activeLeafId = leaf.id;
+  }
+
+  // A pure version-switch (only activeLeafId changes) is read-only navigation, so
+  // it must NOT bump updatedAt — otherwise merely paging message versions would
+  // reorder the chat to the top of the sidebar. Prisma applies @updatedAt on every
+  // .update(), so persist the leaf with a raw UPDATE that leaves updatedAt intact.
+  // Any title/project edit uses the normal path (which does bump updatedAt).
+  const onlyLeafSwitch =
+    data.title === undefined &&
+    data.projectId === undefined &&
+    data.activeLeafId !== undefined;
+
+  if (onlyLeafSwitch) {
+    await prisma.$executeRaw`UPDATE "Conversation" SET "activeLeafId" = ${data.activeLeafId} WHERE "id" = ${params.id}`;
+  } else {
+    await prisma.conversation.update({ where: { id: params.id }, data });
+  }
+
+  const updated = await prisma.conversation.findUniqueOrThrow({
     where: { id: params.id },
-    data,
     select: {
       id: true,
       title: true,

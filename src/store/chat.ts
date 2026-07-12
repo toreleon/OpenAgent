@@ -4,6 +4,7 @@ import { create } from "zustand";
 import type {
   Artifact,
   ArtifactRef,
+  SiteRef,
   ArtifactVersion,
   Attachment,
   ChatMessage,
@@ -12,6 +13,7 @@ import type {
   ResearchPhase,
   ResearchState,
   StreamEvent,
+  SubagentState,
   ToolCallRecord,
   TraceItem,
 } from "@/lib/types";
@@ -51,7 +53,16 @@ export interface ChatState {
   // ---- data ----
   conversations: ConversationSummary[];
   currentId: string | null;
+  /**
+   * The full message TREE for the current conversation (every edit/regenerate
+   * branch), NOT just the visible list. The rendered conversation is derived as
+   * the chain of parents from {@link activeLeafId} up to a root; sibling
+   * branches under one parent are the selectable "versions". See
+   * {@link computeVisiblePath} / {@link computeVersionInfo}.
+   */
   messages: ChatMessage[];
+  /** Leaf of the currently-visible branch; null for an empty conversation. */
+  activeLeafId: string | null;
   model: string;
   /** Reasoning effort applied to the next turn (see REASONING_EFFORTS). */
   effort: ReasoningEffort;
@@ -125,7 +136,25 @@ export interface ChatState {
     attachments: Attachment[],
     options?: SendOptions,
   ) => Promise<void>;
-  regenerate: () => Promise<void>;
+  /**
+   * Edit a user message: send `text` as a NEW sibling under the original's
+   * parent and stream a fresh reply. The original branch is preserved and both
+   * become selectable versions. No-op while streaming or before the conversation
+   * exists. Reuses the original message's attachments.
+   */
+  editMessage: (messageId: string, text: string) => Promise<void>;
+  /**
+   * Regenerate an assistant reply as a NEW sibling under the same user message
+   * (the prior reply is kept as a version). Defaults to the last reply on the
+   * visible path when no id is given.
+   */
+  regenerate: (assistantMessageId?: string) => Promise<void>;
+  /**
+   * Page between sibling "versions" of `messageId` (edit/regenerate branches),
+   * moving the active leaf to the chosen sibling's latest descendant. Persisted
+   * so the choice survives a reload. No-op while streaming.
+   */
+  switchVersion: (messageId: string, direction: "prev" | "next") => void;
   stop: () => void;
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -139,6 +168,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   currentId: null,
   messages: [],
+  activeLeafId: null,
   model: DEFAULT_MODEL,
   effort: DEFAULT_EFFORT,
   deepResearch: false,
@@ -183,6 +213,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messagesLoading: true,
       currentId: id,
       messages: [],
+      activeLeafId: null,
       artifacts: [],
       openArtifactId: null,
       openArtifactVersion: null,
@@ -198,6 +229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         currentId: data.id,
         messages: data.messages,
+        activeLeafId: data.activeLeafId ?? null,
         model: data.model || get().model,
         artifacts: data.artifacts ?? [],
         activeProjectId: data.projectId ?? null,
@@ -214,6 +246,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       currentId: null,
       messages: [],
+      activeLeafId: null,
       error: null,
       artifacts: [],
       openArtifactId: null,
@@ -317,10 +350,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Only seed a project on brand-new conversations; existing chats keep the
     // project they were created with (the server ignores it for existing ids).
     const projectId = conversationId ? undefined : get().activeProjectId ?? undefined;
+    // Attach the new turn under the current active leaf (null for the first
+    // message). The server also defaults to this, but sending it keeps the client
+    // and server in agreement when branches exist.
+    const parentId = get().activeLeafId;
 
     const userMessage: ChatMessage = {
       id: tempId(),
       role: "user",
+      parentId,
       content: trimmed,
       attachments: attachments.length ? attachments : undefined,
       createdAt: nowIso(),
@@ -330,117 +368,175 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const assistantMessage: ChatMessage = {
       id: assistantId,
       role: "assistant",
+      parentId: userMessage.id,
       content: "",
       createdAt: nowIso(),
     };
 
     set((s) => ({
       messages: [...s.messages, userMessage, assistantMessage],
+      activeLeafId: assistantId,
       isStreaming: true,
       streamingMessageId: assistantId,
       error: null,
     }));
 
-    abortController = new AbortController();
-    const toolCalls: ToolCallRecord[] = [];
-    // Ordered interleaved trace (reasoning segments + tool rows) built live from
-    // the SSE stream, mirroring what the server persists as `timeline`.
-    const timeline: TraceItem[] = [];
-    assistantIdRef.current = assistantId;
-    reasoningStartRef.current = null;
-    reasoningDoneRef.current = false;
-
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversationId,
-          message: trimmed,
-          model,
-          effort,
-          deepResearch,
-          projectId,
-          attachments: attachments.length ? attachments : undefined,
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!res.ok) {
-        let message = "Request failed";
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body.error) message = body.error;
-        } catch {
-          /* non-JSON error body */
-        }
-        throw new Error(message);
-      }
-
-      const newConversationId = res.headers.get("X-Conversation-Id");
-      const wasNew = !conversationId && !!newConversationId;
-      if (newConversationId) {
-        set({ currentId: newConversationId });
-        if (typeof window !== "undefined") {
-          window.history.replaceState(null, "", `/c/${newConversationId}`);
-        }
-      }
-
-      for await (const event of parseSSE(res)) {
-        applyEvent(event, assistantId, toolCalls, timeline, set);
-      }
-
-      // Refresh sidebar list so titles / ordering reflect the new exchange.
-      if (wasNew) {
-        void get().loadConversations();
-      } else {
-        // Bump updatedAt locally for ordering.
-        const cid = get().currentId;
-        if (cid) {
-          set((s) => ({
-            conversations: bumpUpdatedAt(s.conversations, cid),
-          }));
-        }
-      }
-    } catch (e) {
-      const aborted =
-        e instanceof DOMException && e.name === "AbortError";
-      // Whether the user hit Stop or the request failed, end the thinking phase
-      // (collapse the pill) and mark any still-spinning tool row as errored — so
-      // the turn never stays stuck on a live, non-collapsible "Thinking…".
-      const id = assistantIdRef.current ?? assistantId;
-      failRunningTools(timeline);
-      finishThinking(id, timeline, set);
-      if (!aborted) {
-        const message = e instanceof Error ? e.message : "Something went wrong";
-        set((s) => ({
-          error: message,
-          messages: appendErrorToAssistant(s.messages, id, message),
-        }));
-      }
-    } finally {
-      abortController = null;
-      set({ isStreaming: false, streamingMessageId: null });
-    }
+    await runChatTurn(set, get, {
+      body: {
+        conversationId,
+        message: trimmed,
+        model,
+        effort,
+        deepResearch,
+        projectId,
+        parentId,
+        attachments: attachments.length ? attachments : undefined,
+      },
+      assistantId,
+      userTempId: userMessage.id,
+      // parentId is the active leaf before this turn — restore it if the turn
+      // fails before the server confirms any ids (see runChatTurn).
+      prevActiveLeafId: parentId,
+      hadConversationId: !!conversationId,
+    });
   },
 
-  regenerate: async () => {
+  editMessage: async (messageId, text) => {
+    const trimmed = text.trim();
+    if (!trimmed || get().isStreaming) return;
+    const conversationId = get().currentId;
+    if (!conversationId) return; // can't branch before the conversation exists
+    const original = get().messages.find((m) => m.id === messageId);
+    if (!original || original.role !== "user") return;
+
+    const model = get().model;
+    const effort = get().effort;
+    const parentId = original.parentId ?? null;
+    // Editing changes the text only — carry the original message's attachments.
+    const attachments = original.attachments ?? [];
+
+    const userMessage: ChatMessage = {
+      id: tempId(),
+      role: "user",
+      parentId,
+      content: trimmed,
+      attachments: attachments.length ? attachments : undefined,
+      createdAt: nowIso(),
+    };
+    const assistantId = tempId();
+    const assistantMessage: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      parentId: userMessage.id,
+      content: "",
+      createdAt: nowIso(),
+    };
+
+    const prevActiveLeafId = get().activeLeafId;
+    set((s) => ({
+      messages: [...s.messages, userMessage, assistantMessage],
+      activeLeafId: assistantId,
+      isStreaming: true,
+      streamingMessageId: assistantId,
+      error: null,
+    }));
+
+    await runChatTurn(set, get, {
+      body: {
+        conversationId,
+        message: trimmed,
+        model,
+        effort,
+        parentId,
+        attachments: attachments.length ? attachments : undefined,
+      },
+      assistantId,
+      userTempId: userMessage.id,
+      prevActiveLeafId,
+      hadConversationId: true,
+    });
+  },
+
+  regenerate: async (assistantMessageId) => {
     if (get().isStreaming) return;
-    const messages = get().messages;
-    // Find the last user message; drop everything after it and resend.
-    let lastUserIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        lastUserIdx = i;
-        break;
+    const conversationId = get().currentId;
+    if (!conversationId) return;
+    const all = get().messages;
+
+    // Default target: the last assistant message on the visible path.
+    let targetId = assistantMessageId;
+    if (!targetId) {
+      const path = computeVisiblePath(all, get().activeLeafId);
+      for (let i = path.length - 1; i >= 0; i--) {
+        if (path[i].role === "assistant") {
+          targetId = path[i].id;
+          break;
+        }
       }
     }
-    if (lastUserIdx === -1) return;
-    const lastUser = messages[lastUserIdx];
-    set({ messages: messages.slice(0, lastUserIdx) });
-    await get().sendMessage(lastUser.content, lastUser.attachments ?? [], {
-      conversationId: get().currentId ?? undefined,
+    const target = targetId ? all.find((m) => m.id === targetId) : undefined;
+    if (!target || target.role !== "assistant") return;
+    // The user message this reply answers — the parent the new sibling hangs off.
+    const userParentId = target.parentId;
+    if (!userParentId) return;
+
+    const model = get().model;
+    const effort = get().effort;
+
+    const assistantId = tempId();
+    const assistantMessage: ChatMessage = {
+      id: assistantId,
+      role: "assistant",
+      parentId: userParentId,
+      content: "",
+      createdAt: nowIso(),
+    };
+
+    const prevActiveLeafId = get().activeLeafId;
+    set((s) => ({
+      messages: [...s.messages, assistantMessage],
+      activeLeafId: assistantId,
+      isStreaming: true,
+      streamingMessageId: assistantId,
+      error: null,
+    }));
+
+    await runChatTurn(set, get, {
+      body: { conversationId, regenerate: true, parentId: userParentId, model, effort },
+      assistantId,
+      prevActiveLeafId,
+      hadConversationId: true,
     });
+  },
+
+  switchVersion: (messageId, direction) => {
+    if (get().isStreaming) return;
+    const all = get().messages;
+    const info = computeVersionInfo(all).get(messageId);
+    if (!info) return;
+    const target = direction === "next" ? info.nextSiblingId : info.prevSiblingId;
+    if (!target) return;
+    // Follow the chosen sibling down to its latest descendant — that leaf defines
+    // the whole visible path below the switch point.
+    const newLeaf = deepestLeaf(all, target);
+    set({ activeLeafId: newLeaf });
+
+    // Persist the branch choice so a reload rehydrates the same path. Version
+    // arrows only appear on messages with reconciled (real) sibling ids, so
+    // `newLeaf` is a persisted id in practice; the PATCH is nonetheless
+    // best-effort — the in-memory switch has already applied, and a rejected
+    // persist (e.g. 404 on an id the server can't find) is swallowed and simply
+    // means a reload would fall back to the stored leaf.
+    const cid = get().currentId;
+    if (cid) {
+      void fetch(`/api/conversations/${cid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activeLeafId: newLeaf }),
+      }).catch(() => {
+        /* non-fatal: the in-memory branch switch already happened */
+      });
+    }
   },
 
   stop: () => {
@@ -483,7 +579,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
       if (wasCurrent) {
-        set({ currentId: null, messages: [] });
+        set({ currentId: null, messages: [], activeLeafId: null });
         if (typeof window !== "undefined") {
           window.history.replaceState(null, "", "/");
         }
@@ -513,16 +609,36 @@ function applyEvent(
 ) {
   switch (event.type) {
     case "message_id": {
-      // Re-id the streaming assistant message to the server's id.
+      // Re-id the streaming assistant message to the server's id — in the tree,
+      // as the streaming pointer, and as the active leaf (so the branch keeps
+      // pointing at this reply once it has its real id).
       set((s) => ({
         messages: s.messages.map((m) =>
           m.id === assistantId ? { ...m, id: event.id } : m,
         ),
         streamingMessageId:
           s.streamingMessageId === assistantId ? event.id : s.streamingMessageId,
+        activeLeafId: s.activeLeafId === assistantId ? event.id : s.activeLeafId,
       }));
       // From here on we keep referencing the *current* streaming id.
       assistantIdRef.current = event.id;
+      break;
+    }
+    case "user_message": {
+      // Reconcile the optimistic user bubble with its persisted id: re-id it and
+      // repoint the assistant child that referenced the temp id, so the tree
+      // matches what a reload would load (sibling "versions" stay coherent).
+      const tmp = userIdRef.current;
+      if (!tmp) break;
+      set((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id === tmp) return { ...m, id: event.id, parentId: event.parentId };
+          if (m.parentId === tmp) return { ...m, parentId: event.id };
+          return m;
+        }),
+        activeLeafId: s.activeLeafId === tmp ? event.id : s.activeLeafId,
+      }));
+      userIdRef.current = event.id;
       break;
     }
     case "reasoning_delta": {
@@ -714,6 +830,26 @@ function applyEvent(
       });
       break;
     }
+    case "site": {
+      // Record the built/deployed Site on the assistant message so its inline
+      // SiteChip renders live (and survives reload — the server persists it too).
+      const id = assistantIdRef.current ?? assistantId;
+      const snap = event.site;
+      const ref: SiteRef = {
+        siteId: snap.id,
+        slug: snap.slug,
+        name: snap.name,
+        command: event.command,
+        deployed: snap.deployed,
+        publicPath: snap.publicPath,
+      };
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === id ? { ...m, siteRefs: [...(m.siteRefs ?? []), ref] } : m,
+        ),
+      }));
+      break;
+    }
     case "research_plan": {
       const id = assistantIdRef.current ?? assistantId;
       set((s) => ({
@@ -752,6 +888,24 @@ function applyEvent(
       }));
       break;
     }
+    case "subagent_activity": {
+      const id = assistantIdRef.current ?? assistantId;
+      set((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id !== id) return m;
+          const prev: SubagentState = m.subagents ?? { agents: [] };
+          const agents = prev.agents ? [...prev.agents] : [];
+          const idx = agents.findIndex((a) => a.id === event.activity.id);
+          if (idx === -1) {
+            agents.push(event.activity);
+          } else {
+            agents[idx] = event.activity;
+          }
+          return { ...m, subagents: { ...prev, agents } };
+        }),
+      }));
+      break;
+    }
     case "title": {
       set((s) => {
         const cid = s.currentId;
@@ -766,6 +920,7 @@ function applyEvent(
       // mark it errored, and end the thinking phase so the trace collapses to a
       // static pill instead of a permanently shimmering "Thinking…".
       failRunningTools(timeline);
+      failRunningSubagents(id, set);
       finishThinking(id, timeline, set);
       set((s) => ({
         error: event.message,
@@ -805,6 +960,130 @@ function applyEvent(
 // Module-level ref to track the live assistant message id across delta events
 // after a `message_id` re-id. Reset to null on `done`.
 const assistantIdRef: { current: string | null } = { current: null };
+
+// Temp id of the optimistic user message created this turn (null on regenerate,
+// which creates none), used to reconcile it against the `user_message` event.
+const userIdRef: { current: string | null } = { current: null };
+
+/**
+ * Shared streaming core for a chat turn. The caller has already inserted the
+ * optimistic messages and set `isStreaming`; this runs the POST, applies the
+ * SSE events (reconciling ids), refreshes the sidebar, and always clears the
+ * streaming flags in `finally`. Used by sendMessage / editMessage / regenerate.
+ */
+async function runChatTurn(
+  set: SetState,
+  get: () => ChatState,
+  args: {
+    body: Record<string, unknown>;
+    assistantId: string;
+    hadConversationId: boolean;
+    /** Temp id of the optimistic user message, when this turn created one. */
+    userTempId?: string;
+    /**
+     * The active leaf BEFORE this turn's optimistic insert. If the turn fails
+     * before the server confirms any ids, we restore it (and drop the temp pair)
+     * so activeLeafId is never left on an unreconciled temp id.
+     */
+    prevActiveLeafId?: string | null;
+  },
+): Promise<void> {
+  const { assistantId } = args;
+  abortController = new AbortController();
+  const toolCalls: ToolCallRecord[] = [];
+  // Ordered interleaved trace (reasoning segments + tool rows) built live from
+  // the SSE stream, mirroring what the server persists as `timeline`.
+  const timeline: TraceItem[] = [];
+  assistantIdRef.current = assistantId;
+  userIdRef.current = args.userTempId ?? null;
+  reasoningStartRef.current = null;
+  reasoningDoneRef.current = false;
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args.body),
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      let message = "Request failed";
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new Error(message);
+    }
+
+    const newConversationId = res.headers.get("X-Conversation-Id");
+    const wasNew = !args.hadConversationId && !!newConversationId;
+    if (newConversationId) {
+      set({ currentId: newConversationId });
+      if (typeof window !== "undefined") {
+        window.history.replaceState(null, "", `/c/${newConversationId}`);
+      }
+    }
+
+    for await (const event of parseSSE(res)) {
+      applyEvent(event, assistantId, toolCalls, timeline, set);
+    }
+
+    // Refresh sidebar list so titles / ordering reflect the new exchange.
+    if (wasNew) {
+      void get().loadConversations();
+    } else {
+      // Bump updatedAt locally for ordering.
+      const cid = get().currentId;
+      if (cid) {
+        set((s) => ({ conversations: bumpUpdatedAt(s.conversations, cid) }));
+      }
+    }
+  } catch (e) {
+    const aborted = e instanceof DOMException && e.name === "AbortError";
+    // Did the server confirm this turn? `message_id` re-points assistantIdRef off
+    // the temp id; if it never arrived (Stop in the pre-stream window, a non-ok
+    // HTTP, a network drop), nothing was reliably persisted under our temp ids.
+    const reconciled = assistantIdRef.current !== assistantId;
+    if (!reconciled) {
+      // Drop the un-persisted optimistic pair and restore the prior active leaf,
+      // so activeLeafId is never left on a temp id (the NEXT turn's parentId would
+      // otherwise be unresolvable and could detach a new root / drop history).
+      set((s) => ({
+        messages: s.messages.filter(
+          (m) => m.id !== assistantId && m.id !== args.userTempId,
+        ),
+        activeLeafId:
+          s.activeLeafId === assistantId
+            ? args.prevActiveLeafId ?? null
+            : s.activeLeafId,
+        ...(aborted
+          ? null
+          : { error: e instanceof Error ? e.message : "Something went wrong" }),
+      }));
+    } else {
+      // The assistant already has a real id: keep it and end the thinking phase
+      // (collapse the pill, mark any still-spinning tool/subagent row errored) so
+      // the turn never stays stuck on a live, non-collapsible "Thinking…".
+      const id = assistantIdRef.current ?? assistantId;
+      failRunningTools(timeline);
+      failRunningSubagents(id, set);
+      finishThinking(id, timeline, set);
+      if (!aborted) {
+        const message = e instanceof Error ? e.message : "Something went wrong";
+        set((s) => ({
+          error: message,
+          messages: appendErrorToAssistant(s.messages, id, message),
+        }));
+      }
+    }
+  } finally {
+    abortController = null;
+    set({ isStreaming: false, streamingMessageId: null });
+  }
+}
 
 // Reasoning timing refs (module-level, not React state). `reasoningStartRef`
 // is set on the first `reasoning_delta`; `reasoningDoneRef` guards against
@@ -852,6 +1131,32 @@ function failRunningTools(timeline: TraceItem[]) {
 }
 
 /**
+ * The subagent counterpart to {@link failRunningTools}: when a turn is stopped
+ * or errors while workers are still dispatched, no terminal `subagent_activity`
+ * event will arrive for the in-flight ones, so flip any still-"running" worker
+ * to "failed". Without this, the collapsed "Subagents" panel would show a
+ * perpetual spinner in the live session until a reload rehydrates the server's
+ * finalized state (finalizeSubagents). No-op when nothing is running.
+ */
+function failRunningSubagents(id: string, set: SetState) {
+  set((s) => ({
+    messages: s.messages.map((m) => {
+      if (m.id !== id || !m.subagents?.agents?.length) return m;
+      if (!m.subagents.agents.some((a) => a.status === "running")) return m;
+      return {
+        ...m,
+        subagents: {
+          ...m.subagents,
+          agents: m.subagents.agents.map((a) =>
+            a.status === "running" ? { ...a, status: "failed" as const } : a,
+          ),
+        },
+      };
+    }),
+  }));
+}
+
+/**
  * End the thinking phase: collapse the trace (finishReasoning) and flush the
  * latest timeline snapshot to the message so any status changes (e.g. a tool
  * flipped to "error") are reflected. Safe to call after finishReasoning already
@@ -892,4 +1197,109 @@ function setTitle(
   title: string,
 ): ConversationSummary[] {
   return list.map((c) => (c.id === id ? { ...c, title } : c));
+}
+
+// ---------------------------------------------------------------------------
+// Message-tree helpers (edit / regenerate branching)
+// ---------------------------------------------------------------------------
+
+/** Version position of a message among its same-parent siblings. */
+export interface VersionInfo {
+  /** 0-based index of this message among its siblings (creation order). */
+  index: number;
+  /** Number of sibling versions (>= 1). */
+  count: number;
+  /** Previous sibling id, or null when this is the first version. */
+  prevSiblingId: string | null;
+  /** Next sibling id, or null when this is the last version. */
+  nextSiblingId: string | null;
+}
+
+/**
+ * Group messages by parent (null parent = roots), each list ordered by creation
+ * time then id so sibling "versions" page in a stable, oldest-first order.
+ */
+function childrenByParent(
+  all: ChatMessage[],
+): Map<string | null, ChatMessage[]> {
+  const map = new Map<string | null, ChatMessage[]>();
+  for (const m of all) {
+    const key = m.parentId ?? null;
+    const arr = map.get(key);
+    if (arr) arr.push(m);
+    else map.set(key, [m]);
+  }
+  for (const arr of map.values()) {
+    arr.sort(
+      (a, b) =>
+        a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    );
+  }
+  return map;
+}
+
+/**
+ * The visible conversation: the chain of parents from `leafId` up to a root,
+ * returned root-first. Falls back to the latest-created message as the leaf when
+ * `leafId` is missing/unresolved (e.g. legacy data), and returns [] for an empty
+ * tree. Cycle-safe.
+ */
+export function computeVisiblePath(
+  all: ChatMessage[],
+  leafId: string | null,
+): ChatMessage[] {
+  if (all.length === 0) return [];
+  const byId = new Map(all.map((m) => [m.id, m]));
+  let leaf = leafId ? byId.get(leafId) : undefined;
+  if (!leaf) {
+    // No usable leaf: pick the newest message so the UI still shows something.
+    leaf = [...all].sort(
+      (a, b) =>
+        a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    )[all.length - 1];
+  }
+  const path: ChatMessage[] = [];
+  const seen = new Set<string>();
+  let cur: ChatMessage | undefined = leaf;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    path.unshift(cur);
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return path;
+}
+
+/** Per-message version info (siblings sharing a parent are versions). */
+export function computeVersionInfo(all: ChatMessage[]): Map<string, VersionInfo> {
+  const info = new Map<string, VersionInfo>();
+  for (const siblings of childrenByParent(all).values()) {
+    const count = siblings.length;
+    siblings.forEach((m, i) => {
+      info.set(m.id, {
+        index: i,
+        count,
+        prevSiblingId: i > 0 ? siblings[i - 1].id : null,
+        nextSiblingId: i < count - 1 ? siblings[i + 1].id : null,
+      });
+    });
+  }
+  return info;
+}
+
+/**
+ * The deepest descendant of `startId`, following the latest-created child at
+ * each step — i.e. the leaf that a freshly-picked branch should point at.
+ * Cycle-safe; returns `startId` when it has no children.
+ */
+export function deepestLeaf(all: ChatMessage[], startId: string): string {
+  const kids = childrenByParent(all);
+  let cur = startId;
+  const seen = new Set<string>();
+  while (!seen.has(cur)) {
+    seen.add(cur);
+    const children = kids.get(cur);
+    if (!children || children.length === 0) return cur;
+    cur = children[children.length - 1].id;
+  }
+  return cur;
 }

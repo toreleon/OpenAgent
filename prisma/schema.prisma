@@ -20,6 +20,10 @@ model User {
   // { nickname, occupation, traits, about, enabled }. Injected into the system
   // prompt for every chat when enabled — see src/lib/user/prompt.ts.
   customInstructions String?
+  // Opt-in: when true the assistant may publish a Site to its live public URL
+  // on its own (the `deploy_site` tool). Off by default — deploying to a
+  // production URL is otherwise a human-only action (see src/lib/sites.ts).
+  sitesAutoDeploy    Boolean @default(false)
   createdAt      DateTime @default(now())
 
   accounts      Account[]
@@ -29,6 +33,7 @@ model User {
   schedules     Schedule[]
   projects      Project[]
   plugins       Plugin[]
+  sites         Site[]
 }
 
 // ---- NextAuth standard models ----
@@ -88,6 +93,12 @@ model Conversation {
   // handled in application code (see DELETE /api/projects/[id]); "Remove from
   // project" nulls this column instead.
   projectId String?
+  // The leaf message of the currently-visible branch (ChatGPT-style edit /
+  // regenerate produce a message TREE, not a linear list — see Message.parentId).
+  // The visible path is the chain of parents from this leaf up to a root message.
+  // Null for empty conversations; backfilled to the last message for legacy chats.
+  // Not a Prisma relation (avoids an FK cycle); app-managed like other pointers.
+  activeLeafId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -105,6 +116,15 @@ model Conversation {
 model Message {
   id             String   @id @default(cuid())
   conversationId String
+  // Parent message in the conversation TREE. Null for a root (the first user
+  // message, or an edited first user message). Editing a user message or
+  // regenerating an assistant reply creates a NEW child that shares its parent
+  // with the original — i.e. a sibling "version". The visible conversation is
+  // the path from Conversation.activeLeafId up through parentId to a root, so
+  // siblings under one parent are the selectable versions the UI pages through.
+  // Self-relation is emulated in app code (no Prisma relation) to match the
+  // SQLite/no-FK-enforcement convention used elsewhere in this schema.
+  parentId       String?
   role           String // "user" | "assistant" | "system" | "tool"
   content        String // Text
   attachments    String? // JSON-encoded Attachment[]
@@ -113,12 +133,15 @@ model Message {
   reasoningMs    Int? // Total thinking wall-clock (reasoning + tools), in ms
   timeline       String? // JSON-encoded TraceItem[] — ordered interleaved reasoning + tool activity
   artifactRefs   String? // JSON-encoded ArtifactRef[] — artifacts this message created/updated
+  siteRefs       String? // JSON-encoded SiteRef[] — Sites this message built/deployed
   research       String? // JSON-encoded ResearchState — Deep Research plan + activity log
+  subagents      String? // JSON-encoded SubagentState — parallel-subagent panel state
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+  @@index([parentId])
 }
 
 // A Claude-Desktop-style Artifact: a substantial, self-contained, versioned
@@ -163,6 +186,75 @@ model ArtifactVersion {
 
   @@unique([artifactId, version])
   @@index([artifactId])
+}
+
+// A ChatGPT-Sites-style Site: a first-class, USER-owned, publishable web
+// page/app built from a prompt (or seeded from an Artifact) and served at a
+// public URL (/s/<slug>). A Site is deliberately independent of the chat that
+// created it — it survives conversation/artifact deletion (owned by the User,
+// `createdInConversationId` is provenance only). Editing happens on a mutable
+// `draft*` buffer; "Save a Version" snapshots the draft into an immutable
+// SiteVersion; "Deploy" flips the single `liveVersionId` pointer, so the public
+// URL only changes on an explicit deploy. See src/lib/sites.ts.
+model Site {
+  id                      String   @id @default(cuid())
+  userId                  String
+  // Global public slug: the {slug} in /s/{slug}. Includes a random suffix so
+  // link-visibility URLs are unguessable. Unique across all users.
+  slug                    String   @unique
+  name                    String
+  description             String?
+  // ---- DRAFT: mutable working buffer (edited by tools + editor). NEVER served
+  // publicly; only a deployed SiteVersion is. ----
+  draftType               String   @default("html") // SiteType (preview-capable only)
+  draftContent            String   @default("")
+  draftLanguage           String?
+  // ---- DEPLOYED POINTER (null = never deployed / taken offline → public 404) ----
+  // Plain column, NOT a Prisma relation (avoids a required-FK cycle; matches the
+  // app convention of emulating pointers in code). App nulls it if the pointed-to
+  // SiteVersion is deleted.
+  liveVersionId           String?
+  deployedAt              DateTime?
+  // ---- ACCESS ---- "private" | "link" | "workspace" (workspace serving deferred)
+  visibility              String   @default("private")
+  // ---- PROVENANCE (dangling-tolerant; the Site outlives all of these) ----
+  sourceType              String   @default("tool") // "tool" | "artifact" | "manual"
+  sourceArtifactId        String?  // plain column, app-nulled if the artifact is gone
+  createdInConversationId String?  // provenance only, NOT a relation
+  // JSON hosting.json stub { project_id: <site.id>, d1: null, r2: null } — a nod
+  // to ChatGPT Sites' manifest; storage backends are out of scope for this clone.
+  manifest                String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions SiteVersion[]
+
+  @@index([userId])
+  @@index([createdInConversationId])
+}
+
+// One immutable build snapshot of a Site's draft, created by "Save a Version".
+// `version` is 1-based and increments per save. `commit` = sha256(content) prefix
+// — a stand-in for ChatGPT Sites' "version associated with a git commit".
+// Deploying points Site.liveVersionId at one of these.
+model SiteVersion {
+  id              String   @id @default(cuid())
+  siteId          String
+  version         Int
+  type            String   // snapshot of Site.draftType at save time
+  title           String
+  language        String?
+  content         String   // full immutable content snapshot
+  commit          String   // sha256(content).slice(0, 12)
+  label           String?  // optional human label ("dark-mode pass")
+  sourceMessageId String?  // assistant message that produced this version
+  createdAt       DateTime @default(now())
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, version])
+  @@index([siteId])
 }
 
 // A remote MCP (Model Context Protocol) server registered by a user, exposed in
@@ -303,6 +395,8 @@ model Project {
   id           String   @id @default(cuid())
   userId       String
   name         String
+  // A user-selected semantic icon name (e.g. "code", "book", "rocket").
+  icon         String   @default("folder")
   description  String? // optional short summary shown on the project card
   instructions String? // custom instructions injected into every chat's system prompt
   createdAt    DateTime @default(now())

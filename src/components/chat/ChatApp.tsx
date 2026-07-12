@@ -43,6 +43,7 @@ export function ChatApp({ conversationId }: ChatAppProps) {
   const requestedProjectId = searchParams.get("project");
 
   const messages = useChatStore((s) => s.messages);
+  const activeLeafId = useChatStore((s) => s.activeLeafId);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamingMessageId = useChatStore((s) => s.streamingMessageId);
   const model = useChatStore((s) => s.model);
@@ -58,6 +59,8 @@ export function ChatApp({ conversationId }: ChatAppProps) {
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stop = useChatStore((s) => s.stop);
   const regenerate = useChatStore((s) => s.regenerate);
+  const editMessage = useChatStore((s) => s.editMessage);
+  const switchVersion = useChatStore((s) => s.switchVersion);
   const loadConversations = useChatStore((s) => s.loadConversations);
   const loadConversation = useChatStore((s) => s.loadConversation);
   const newChat = useChatStore((s) => s.newChat);
@@ -272,9 +275,12 @@ export function ChatApp({ conversationId }: ChatAppProps) {
         {hasMessages || messagesLoading ? (
           <MessageList
             messages={messages}
+            activeLeafId={activeLeafId}
             isStreaming={isStreaming}
             streamingMessageId={streamingMessageId}
             onRegenerate={regenerate}
+            onEditMessage={editMessage}
+            onSwitchVersion={switchVersion}
           />
         ) : (
           <div className="flex-1 overflow-y-auto">
