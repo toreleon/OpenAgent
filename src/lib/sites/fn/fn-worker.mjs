@@ -52,6 +52,7 @@ function callHost(cap, args) {
   return new Promise((resolve, reject) => {
     const to = setTimeout(() => { pending.delete(callId); reject(new Error("host_timeout")); }, 3000);
     pending.set(callId, {
+      to,
       resolve: (v) => { clearTimeout(to); resolve(v); },
       reject: (e) => { clearTimeout(to); reject(e); },
     });
@@ -72,6 +73,10 @@ parentPort.on("message", async (m) => {
     parentPort.postMessage({ t: MSG.DONE, invocationId: m.invocationId, ...(await runGuest(m)) });
   } catch {
     parentPort.postMessage({ t: MSG.DONE, invocationId: m.invocationId, ok: false, code: 500, error: "fn_error" });
+  } finally {
+    // Clear the active id so a LATE background rejection (unhandledRejection
+    // handler) can't stamp itself onto the NEXT invocation on this reused worker.
+    activeId = null;
   }
 });
 
@@ -102,6 +107,7 @@ async function runGuest({ invocationId, code, request, limits }) {
   const wallDeadline = Date.now() + limits.wallClockMs;
   let poisoned = false;
   let terminate = false;
+  let disposed = false; // once the runtime is torn down, no continuation may touch ctx
   const ctx = scope.manage(rt.newContext());
 
   try {
@@ -125,12 +131,17 @@ async function runGuest({ invocationId, code, request, limits }) {
         if (payload == null || payload.length > CAP_ARG_MAX) {
           const h = ctx.newString("arg_too_large"); d.reject(h); h.dispose();
         } else {
+          // BLOCKER FIX: if this host round-trip settles AFTER the invocation
+          // finished (missing await, Promise.race loser, throw-after-dispatch, or
+          // the callHost timeout), the runtime is already disposed — touching ctx
+          // would throw QuickJSUseAfterFree → unhandledRejection → process.exit,
+          // crashing a worker now serving a DIFFERENT tenant. Guard + swallow.
           callHost(dotted, args).then(
-            (v) => { const h = ctx.newString(JSON.stringify(v ?? null)); d.resolve(h); h.dispose(); },
-            (e) => { const h = ctx.newString(String((e && e.message) || e)); d.reject(h); h.dispose(); },
+            (v) => { if (disposed) return; try { const h = ctx.newString(JSON.stringify(v ?? null)); d.resolve(h); h.dispose(); } catch {} },
+            (e) => { if (disposed) return; try { const h = ctx.newString(String((e && e.message) || e)); d.reject(h); h.dispose(); } catch {} },
           );
         }
-        d.settled.then(() => { bumpCpu(); rt.executePendingJobs(); });
+        d.settled.then(() => { if (disposed) return; try { bumpCpu(); rt.executePendingJobs(); } catch {} });
         return d.handle;
       }));
       ctx.setProp(parent, method, f);
@@ -200,6 +211,12 @@ async function runGuest({ invocationId, code, request, limits }) {
   } catch (e) {
     return { ok: false, code: 500, error: classify(e), _log: String((e && e.message) || e) };
   } finally {
+    disposed = true; // set BEFORE dispose so queued continuations become no-ops
+    // Drop this invocation's outstanding host-call timers so they can't fire (and
+    // reject into a disposed ctx) after teardown; a late CAP_RESULT then finds no
+    // pending entry and is ignored.
+    for (const [, p] of pending) { try { clearTimeout(p.to); } catch {} }
+    pending.clear();
     for (const d of deferreds) { try { d.dispose(); } catch {} }
     if (!terminate) {
       try { scope.dispose(); rt.dispose(); }

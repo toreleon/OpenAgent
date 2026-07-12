@@ -426,29 +426,38 @@ export async function POST(req: Request, { params }: Params) {
   if (path[0] === "fn" && path.length === 2) {
     if (!(await functionsGloballyEnabled())) return notFound();
     if (!validName(path[1])) return json({ error: "bad_name" }, 400);
+    // Per-IP flood guard here; the per-site hourly compute BUDGET is charged
+    // inside runSiteFunction (only for a real, armed function) so 404s can't drain it.
     if (!(await siteStore.checkWriteRate(`fn:${r.siteId}`, ipBlock(req), { windowSec: 60, max: 20 }))) {
-      return json({ error: "rate_limited" }, 429);
-    }
-    if (!(await siteStore.checkWriteRate(`fnbudget:${r.siteId}`, "site", { windowSec: 3600, max: 300 }))) {
       return json({ error: "rate_limited" }, 429);
     }
     const parsed = await readJsonBody(req);
     if ("deny" in parsed) return parsed.deny;
-    const rec = parsed.value as Record<string, unknown> | null;
+    const rec = parsed.value;
+    // Guard the shape: a JSON primitive body (42, "x", true) makes `"input" in rec` throw.
+    const isObj = rec !== null && typeof rec === "object" && !Array.isArray(rec);
+    const input = isObj && "input" in (rec as Record<string, unknown>) ? (rec as Record<string, unknown>).input : rec;
     const id = await getIdentity(req, r.siteId);
     const account = id.account ? { username: id.account.username } : null;
     const fnRequest = {
       method: "POST" as const,
       path: "/",
       query: Object.fromEntries(new URL(req.url).searchParams),
-      body: rec && "input" in rec ? rec.input : rec,
+      body: input,
       visitorId: identityPublicId(id.scope),
       account,
     };
     const out = await runSiteFunction(r.siteId, path[1], { scope: id.scope, account }, fnRequest);
     if (!out.ok) return json({ error: out.error }, out.code, id.setCookie);
-    const status = Math.min(599, Math.max(100, out.value.status ?? 200));
-    return json(out.value.body ?? null, status, id.setCookie);
+    try {
+      // Guest fully controls status/body — clamp to a valid Response status and
+      // ensure the hardened json() contract always wins even on a weird value.
+      const n = Number(out.value.status);
+      const status = Number.isFinite(n) ? Math.min(599, Math.max(200, Math.trunc(n))) : 200;
+      return json(out.value.body ?? null, status, id.setCookie);
+    } catch {
+      return json({ error: "fn_error" }, 500, id.setCookie);
+    }
   }
 
   if (path[0] !== "docs" || path.length !== 2) return notFound();

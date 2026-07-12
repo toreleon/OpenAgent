@@ -98,6 +98,12 @@ interface Pool {
 const g = globalThis as unknown as { __sitesFnPool?: Pool };
 const pool: Pool = (g.__sitesFnPool ??= { all: new Set(), free: [], q: [] });
 
+let deathCount = 0;
+/** Pool observability (used by tests to assert no worker crash). */
+export function fnPoolStats() {
+  return { workers: pool.all.size, free: pool.free.length, deaths: deathCount };
+}
+
 function spawn(): FnWorker {
   const w = new Worker(WORKER_PATH, {
     env: { NODE_ENV: process.env.NODE_ENV ?? "production" }, // scrub: no secrets/DB urls reach the worker
@@ -111,6 +117,7 @@ function spawn(): FnWorker {
 }
 
 function onWorkerDeath(w: FnWorker) {
+  deathCount++;
   pool.all.delete(w);
   const i = pool.free.indexOf(w);
   if (i >= 0) pool.free.splice(i, 1);
@@ -216,11 +223,20 @@ export async function runSiteFunction(
     return { ok: false, code: 404, error: "not_found" };
   }
   if (breakerOpen(siteId, name)) return { ok: false, code: 404, error: "not_found" };
-  if (!admitGlobal() || perSiteInFlight(siteId) >= PER_SITE_MAX) {
+  // Per-site hourly compute budget — charged only AFTER confirming a real, armed
+  // function, so non-existent/disarmed 404s can't drain it (was in the router).
+  if (!(await siteStore.checkWriteRate(`fnbudget:${siteId}`, "site", { windowSec: 3600, max: 300 }))) {
+    return { ok: false, code: 429, error: "rate_limited" };
+  }
+  // Per-site fairness BEFORE the global token so an over-limit tenant can't burn
+  // process-wide admission without running; refund the token if no worker is free.
+  if (perSiteInFlight(siteId) >= PER_SITE_MAX) return { ok: false, code: 503, error: "busy" };
+  if (!admitGlobal()) return { ok: false, code: 503, error: "busy" };
+  const w = await checkout();
+  if (!w) {
+    bucket.n = Math.max(0, bucket.n - 1);
     return { ok: false, code: 503, error: "busy" };
   }
-  const w = await checkout();
-  if (!w) return { ok: false, code: 503, error: "busy" };
 
   const invocationId = randomBytes(18).toString("base64url");
   const inv: Invocation = { id: invocationId, siteId, scope: who.scope, store: 0, egress: 0 };
@@ -251,6 +267,7 @@ export async function runSiteFunction(
         return;
       }
       if (m.t === MSG.DONE) {
+        if (m.invocationId !== inv.id) return; // ignore a stale/self-report DONE from a prior run
         if (m._log) auditDetail(siteId, name, m._log);
         const out: FnOutcome = m._terminate
           ? { ok: false, code: 504, error: "timeout" }
@@ -269,7 +286,7 @@ export async function runSiteFunction(
       w.__inflight = null;
       decInFlight(siteId);
       if (!out.ok && (out.code === 504 || kill)) recordFailure(siteId, name);
-      audit(siteId, name, inv, out, Date.now() - started);
+      audit(siteId, name, fn.armedHash, inv, out, Date.now() - started);
       if (kill) recycle(w);
       else release(w);
       resolve(out);
@@ -368,13 +385,23 @@ export async function runCap(inv: Invocation, cap: string, args: unknown[]): Pro
 // Audit (server-side only)
 // ---------------------------------------------------------------------------
 
-function audit(siteId: string, name: string, inv: Invocation, out: FnOutcome, durationMs: number) {
+function audit(
+  siteId: string,
+  name: string,
+  armedHash: string | null,
+  inv: Invocation,
+  out: FnOutcome,
+  durationMs: number,
+) {
   console.log(
     "[sites.fn]",
     JSON.stringify({
       siteId,
       name,
-      scope: inv.scope,
+      armedHash, // provenance: which owner-approved source ran
+      // NEVER log the raw scope — for an anonymous visitor it is the unsigned `sv`
+      // bearer token. Log a stable hash instead.
+      visitorScope: sha256(inv.scope).slice(0, 16),
       durationMs,
       outcome: out.ok ? "ok" : out.error,
       storeOps: inv.store,
