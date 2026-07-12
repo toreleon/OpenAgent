@@ -10,13 +10,21 @@
  *
  * These functions are pure (no DOM, no React) so they can be unit-reasoned and
  * reused by every renderer.
+ *
+ * They are ALSO reused verbatim to render published Sites (see
+ * src/app/s/[slug]/route.ts): {@link buildSiteSrcDoc} dispatches by type, and the
+ * public route serves the result under a CSP `sandbox` directive so untrusted
+ * published content runs in an opaque origin (no access to the app's auth cookie)
+ * and can only reach the pinned CDNs below — never the app's own API.
  */
+import type { SiteType } from "@/lib/types";
 
 // Pinned CDN URLs — kept here so every renderer resolves the same versions.
 const BABEL_URL = "https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js";
 const TAILWIND_URL = "https://cdn.tailwindcss.com";
 const MERMAID_URL =
   "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const MARKED_URL = "https://cdn.jsdelivr.net/npm/marked@14/marked.min.js";
 
 // Import map for React artifacts. `?external=react,react-dom` de-duplicates so
 // libraries share the single React instance loaded here (no "invalid hook call").
@@ -197,3 +205,104 @@ export function buildReactSrcDoc(content: string): string {
   </body>
 </html>`;
 }
+
+/**
+ * Build the srcdoc for a `markdown` document: rendered client-side by `marked`
+ * (loaded from a CDN) into a readable prose layout. The source is inlined as a
+ * JSON string literal and script-guarded so an embedded `</script>` can't break
+ * out. Any raw HTML in the markdown executes only inside the sandbox.
+ */
+export function buildMarkdownSrcDoc(content: string): string {
+  const script = guardScript(`
+    (function () {
+      var md = ${JSON.stringify(content)};
+      var root = document.getElementById("root");
+      try { root.innerHTML = window.marked.parse(md); }
+      catch (e) { root.textContent = md; }
+    })();
+  `);
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="${MARKED_URL}"></script>
+    <style>
+      html, body { margin: 0; background: #ffffff; color: #1f2328; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; line-height: 1.6; }
+      #root { max-width: 760px; margin: 0 auto; padding: 40px 24px; }
+      #root h1, #root h2, #root h3 { line-height: 1.25; margin: 1.4em 0 0.6em; }
+      #root h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+      #root h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+      #root p, #root ul, #root ol, #root blockquote, #root table { margin: 0 0 1em; }
+      #root a { color: #0969da; }
+      #root code { background: #f6f8fa; padding: .2em .4em; border-radius: 6px; font: 85% ui-monospace, monospace; }
+      #root pre { background: #f6f8fa; padding: 16px; border-radius: 8px; overflow: auto; }
+      #root pre code { background: none; padding: 0; }
+      #root blockquote { border-left: 4px solid #d0d7de; color: #57606a; padding: 0 1em; }
+      #root img { max-width: 100%; }
+      #root table { border-collapse: collapse; }
+      #root th, #root td { border: 1px solid #d0d7de; padding: 6px 13px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>${script}</script>
+  </body>
+</html>`;
+}
+
+/**
+ * Build the srcdoc for an `image` site: center a single image (URL or data URL)
+ * on a neutral canvas. The URL is escaped for safe insertion as an attribute.
+ */
+export function buildImageSrcDoc(content: string): string {
+  const src = content.trim().replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; height: 100%; }
+      body { display: grid; place-items: center; background: #ffffff; padding: 16px; box-sizing: border-box; }
+      img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    </style>
+  </head>
+  <body><img src="${src}" alt="" /></body>
+</html>`;
+}
+
+/**
+ * Dispatch a Site's stored content + type to the right srcdoc builder. Shared by
+ * the public serving route (src/app/s/[slug]/route.ts) and the in-app Site
+ * preview so a published site renders exactly like its draft preview.
+ */
+export function buildSiteSrcDoc(type: SiteType, content: string): string {
+  switch (type) {
+    case "react":
+      return buildReactSrcDoc(content);
+    case "svg":
+      return buildSvgSrcDoc(content);
+    case "mermaid":
+      return buildMermaidSrcDoc(content);
+    case "markdown":
+      return buildMarkdownSrcDoc(content);
+    case "image":
+      return buildImageSrcDoc(content);
+    case "html":
+    default:
+      return buildHtmlSrcDoc(content);
+  }
+}
+
+/**
+ * The exact CDN hosts the builders above pull from. The public serving route
+ * turns this into the CSP allow-list so published content can reach these — and
+ * ONLY these — origins (never the app's own API). Keep in sync with the pinned
+ * URLs at the top of this file.
+ */
+export const SITE_CDN_HOSTS = [
+  "https://cdn.jsdelivr.net",
+  "https://cdn.tailwindcss.com",
+  "https://esm.sh",
+] as const;

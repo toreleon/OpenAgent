@@ -24,6 +24,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/components/ui/cn";
 import { ArtifactRenderer } from "./ArtifactRenderer";
+import { PublishSiteButton } from "@/components/sites/PublishSiteButton";
 
 /** lucide icon shown next to the title for each artifact type. */
 const TYPE_ICONS: Record<ArtifactType, LucideIcon> = {
@@ -246,8 +247,15 @@ export function ArtifactPanel() {
         <ArtifactRenderer artifact={artifact} version={shownVersion} mode={mode} />
       </div>
 
-      {/* Footer: Copy + Download of the currently-shown version */}
+      {/* Footer: Publish-as-Site (preview types) + Copy + Download */}
       <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-2">
+        {hasPreview && (
+          <PublishSiteButton
+            artifactId={artifact.id}
+            title={artifact.title}
+            className="mr-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+          />
+        )}
         <button
           type="button"
           onClick={() => copy(shownVersion.content)}

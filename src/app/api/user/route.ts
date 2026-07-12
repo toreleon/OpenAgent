@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import prisma from "@/lib/db";
+import { deleteUserSites } from "@/lib/sites";
 import { parseCustomInstructions } from "@/lib/user/prompt";
 import {
   type ApiError,
@@ -108,6 +109,9 @@ export async function DELETE() {
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" } satisfies ApiError, { status: 401 });
   }
+  // Sites are user-owned and published to public URLs, so remove them (and their
+  // versions) explicitly FIRST — never leave a deleted account's sites live.
+  await deleteUserSites(prisma, session.user.id);
   // Cascades conversations/messages/artifacts, projects/files, schedules/runs,
   // connectors, accounts, and sessions via their FKs.
   await prisma.user.delete({ where: { id: session.user.id } });
