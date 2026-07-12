@@ -14,6 +14,7 @@ import type {
   ResearchState,
   StreamEvent,
   SubagentState,
+  BrowserState,
   ToolCallRecord,
   TraceItem,
 } from "@/lib/types";
@@ -843,6 +844,10 @@ function applyEvent(
       // and freeze the duration (including any tool time) now.
       if (!reasoningDoneRef.current && reasoningStartRef.current !== null) {
         finishReasoning(id, set);
+        // Browsing is over too: settle any still-"running" browser card so the
+        // "Browser" panel collapses to its pill instead of pulsing "Browsing…"
+        // through the whole answer-generation phase. (Idempotent; fires once.)
+        settleRunningBrowser(id, set);
       }
       set((s) => ({
         messages: s.messages.map((m) =>
@@ -1060,6 +1065,24 @@ function applyEvent(
       }));
       break;
     }
+    case "browser_activity": {
+      const id = assistantIdRef.current ?? assistantId;
+      set((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id !== id) return m;
+          const prev: BrowserState = m.browser ?? { activities: [] };
+          const activities = prev.activities ? [...prev.activities] : [];
+          const idx = activities.findIndex((a) => a.id === event.activity.id);
+          if (idx === -1) {
+            activities.push(event.activity);
+          } else {
+            activities[idx] = event.activity;
+          }
+          return { ...m, browser: { ...prev, activities } };
+        }),
+      }));
+      break;
+    }
     case "title": {
       set((s) => {
         const cid = s.currentId;
@@ -1075,6 +1098,7 @@ function applyEvent(
       // static pill instead of a permanently shimmering "Thinking…".
       failRunningTools(timeline);
       failRunningSubagents(id, set);
+      settleRunningBrowser(id, set);
       finishThinking(id, timeline, set);
       set((s) => ({
         error: event.message,
@@ -1084,6 +1108,9 @@ function applyEvent(
     }
     case "done": {
       const id = assistantIdRef.current ?? assistantId;
+      // Settle any browsing card still marked running so its client state matches
+      // the server-persisted (finalizeBrowser) state on the next reload.
+      settleRunningBrowser(id, set);
       // Defensive: if reasoning was streaming but never explicitly finished,
       // collapse it now so the Thinking block doesn't stay in the live state.
       if (!reasoningDoneRef.current && reasoningStartRef.current !== null) {
@@ -1224,6 +1251,7 @@ async function runChatTurn(
       const id = assistantIdRef.current ?? assistantId;
       failRunningTools(timeline);
       failRunningSubagents(id, set);
+      settleRunningBrowser(id, set);
       finishThinking(id, timeline, set);
       if (!aborted) {
         const message = e instanceof Error ? e.message : "Something went wrong";
@@ -1322,15 +1350,24 @@ function failRunningSubagents(id: string, set: SetState) {
 }
 
 /**
+ * When a turn ends (done / error / abort), the browser tools emit no terminal
  * event of their own, so SETTLE any browsing card still "running" to "done" —
  * browsing isn't a worker that "failed" — freezing its timer and closing any
+ * in-flight step. Without this the live "Browser" panel would spin forever until
+ * a reload rehydrates the server's finalized state (finalizeBrowser). No-op when
  * nothing is running.
  */
+function settleRunningBrowser(id: string, set: SetState) {
   const now = Date.now();
   set((s) => ({
     messages: s.messages.map((m) => {
+      if (m.id !== id || !m.browser?.activities?.length) return m;
+      if (!m.browser.activities.some((a) => a.status === "running")) return m;
       return {
         ...m,
+        browser: {
+          ...m.browser,
+          activities: m.browser.activities.map((a) =>
             a.status === "running"
               ? {
                   ...a,

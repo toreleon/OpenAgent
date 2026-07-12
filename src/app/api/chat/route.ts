@@ -39,10 +39,13 @@ import {
   type StreamEvent,
   type SubagentActivity,
   type SubagentState,
+  type BrowserActivity,
+  type BrowserState,
   type ToolCallRecord,
   type TraceItem,
 } from "@/lib/types";
 import { extractToolArg } from "@/lib/toolActivity";
+import { isBrowserToolName } from "@/lib/tools/browser";
 
 export const runtime = "nodejs";
 
@@ -145,6 +148,32 @@ function finalizeSubagents(agents: SubagentActivity[]): void {
     a.status = "failed";
     // Bound the persisted duration and close any trailing in-flight trace step so
     // the working-view card rehydrates settled rather than mid-action.
+    if (a.startedAt && a.endedAt === undefined) a.endedAt = now;
+    if (a.trace) for (const s of a.trace) if (s.status === "running") s.status = "done";
+  }
+}
+
+/** Encode accumulated browser-control activity for storage, or null when none ran.
+ *  Drops the base64 screenshots: they are diagnostic-only + streamed live, and
+ *  keeping rendered page pixels in the DB row bloats it and stores content at
+ *  rest. The reloaded panel shows the action trace + page titles/timings. */
+function encodeBrowser(activities: BrowserActivity[]): string | null {
+  if (activities.length === 0) return null;
+  // Setting thumbnailDataUrl to undefined drops the key entirely from JSON.
+  const lean = activities.map((a) => ({ ...a, thumbnailDataUrl: undefined }));
+  return JSON.stringify({ activities: lean } satisfies BrowserState);
+}
+
+/**
+ * Before persisting, SETTLE any browsing card still "running": the stream ended,
+ * so it should rehydrate as a finished card (browsing isn't a worker that
+ * "failed"), with its timer frozen and any trailing in-flight step closed.
+ */
+function finalizeBrowser(activities: BrowserActivity[]): void {
+  const now = Date.now();
+  for (const a of activities) {
+    if (a.status !== "running") continue;
+    a.status = "done";
     if (a.startedAt && a.endedAt === undefined) a.endedAt = now;
     if (a.trace) for (const s of a.trace) if (s.status === "running") s.status = "done";
   }
@@ -533,6 +562,13 @@ export async function POST(req: Request) {
       // True once run_subagents was ATTEMPTED, so the empty-reply retry doesn't
       // re-dispatch subagents (mirrors artifactAttempted/siteAttempted).
       let subagentAttempted = false;
+      // Live browser-control activity, upserted by id as the browser tools stream
+      // `browser_activity` via the streamChat onEvent side channel; persisted as
+      // the `browser` column so the panel rehydrates on reload.
+      const browserActivities: BrowserActivity[] = [];
+      // True once a browser tool was ATTEMPTED (mirrors subagentAttempted) so the
+      // empty-reply retry doesn't re-drive the browser.
+      let browserAttempted = false;
       // JSON-encoded ResearchState for Deep Research turns; null for normal chat.
       let researchColumn: string | null = null;
 
@@ -584,6 +620,20 @@ export async function POST(req: Request) {
         );
         if (idx >= 0) subagentActivities[idx] = event.activity;
         else subagentActivities.push(event.activity);
+        send(event);
+      };
+
+      // The browser tools push `browser_activity` events from inside their execute
+      // via the same onEvent side channel. Upsert by stable id and forward to the
+      // client so the "Browser" panel renders live (mirrors handleSubagentEvent).
+      const handleBrowserEvent = (event: StreamEvent) => {
+        if (event.type !== "browser_activity") return;
+        browserAttempted = true;
+        const idx = browserActivities.findIndex(
+          (a) => a.id === event.activity.id,
+        );
+        if (idx >= 0) browserActivities[idx] = event.activity;
+        else browserActivities.push(event.activity);
         send(event);
       };
 
@@ -814,7 +864,12 @@ export async function POST(req: Request) {
           userId,
           projectContext,
           skillsContext,
-          onEvent: handleSubagentEvent,
+          // Fan the tool side-channel to both rich-panel handlers; each ignores
+          // event kinds it doesn't own, so composing them is safe.
+          onEvent: (event) => {
+            handleSubagentEvent(event);
+            handleBrowserEvent(event);
+          },
         })) {
           switch (event.type) {
             case "reasoning_delta": {
@@ -923,6 +978,14 @@ export async function POST(req: Request) {
                 subagentAttempted = true;
                 break;
               }
+              // Browser tools are intercepted the same way: their live progress
+              // renders as the "Browser" panel (driven by `browser_activity`
+              // events already forwarded via onEvent), so suppress the generic
+              // tool card. The model still receives the tool's own function result.
+              if (isBrowserToolName(event.name)) {
+                browserAttempted = true;
+                break;
+              }
               const recordId = `tool_${toolSeq++}`;
               toolCalls.push({
                 id: recordId,
@@ -946,7 +1009,8 @@ export async function POST(req: Request) {
               if (
                 isArtifactToolName(event.name) ||
                 isSiteToolName(event.name) ||
-                isSubagentToolName(event.name)
+                isSubagentToolName(event.name) ||
+                isBrowserToolName(event.name)
               )
                 break;
               // Attach output to the most recent matching call record.
@@ -994,7 +1058,8 @@ export async function POST(req: Request) {
           !artifactAttempted &&
           siteRefs.length === 0 &&
           !siteAttempted &&
-          !subagentAttempted
+          !subagentAttempted &&
+          !browserAttempted
         ) {
           // Attempt 1 produced nothing meaningful; drop any stray whitespace it
           // streamed so the retry's answer is the sole persisted content.
@@ -1011,6 +1076,7 @@ export async function POST(req: Request) {
         // ---- Persist final assistant message + bump conversation ----
         finalizeTimeline(timeline);
         finalizeSubagents(subagentActivities);
+        finalizeBrowser(browserActivities);
         await prisma.message.update({
           where: { id: assistantMessageId },
           data: {
@@ -1023,6 +1089,7 @@ export async function POST(req: Request) {
             siteRefs: encodeJsonArray(siteRefs),
             research: researchColumn,
             subagents: encodeSubagents(subagentActivities),
+            browser: encodeBrowser(browserActivities),
           },
         });
 
@@ -1063,6 +1130,7 @@ export async function POST(req: Request) {
         try {
           finalizeTimeline(timeline);
           finalizeSubagents(subagentActivities);
+          finalizeBrowser(browserActivities);
           await prisma.message.update({
             where: { id: assistantMessageId },
             data: {
@@ -1075,6 +1143,7 @@ export async function POST(req: Request) {
               siteRefs: encodeJsonArray(siteRefs),
               research: researchColumn,
               subagents: encodeSubagents(subagentActivities),
+              browser: encodeBrowser(browserActivities),
             },
           });
           await prisma.conversation.update({

@@ -125,6 +125,13 @@ export interface ChatMessage {
    * that dispatched no subagents. See {@link SubagentState}.
    */
   subagents?: SubagentState;
+  /**
+   * Built-in browser-control state (assistant messages where the model drove the
+   * browser tools). Holds the live action trace + latest screenshot rendered in
+   * the collapsible "Browser" block above the answer. Absent for turns that did
+   * no browsing. See {@link BrowserState}.
+   */
+  browser?: BrowserState;
   /** ISO 8601 timestamp. */
   createdAt: string;
 }
@@ -243,6 +250,61 @@ export interface SubagentActivity {
 export interface SubagentState {
   /** Each dispatched worker, in dispatch order. */
   agents: SubagentActivity[];
+}
+
+/** Status of one built-in-browser action (and of the browsing card overall). */
+export type BrowserStepStatus = "running" | "done" | "failed";
+
+/**
+ * One step in the built-in browser's live trace — a single action it took
+ * (navigate/snapshot/click/type/screenshot), shown as a row in the "Browser"
+ * working view. `running` while the action is in-flight; flips to `done` (or
+ * `failed`) once it settles. Mirrors {@link SubagentTraceStep}, plus `failed`.
+ */
+export interface BrowserTraceStep {
+  /** Friendly, tensed label, e.g. "Navigating to example.com". */
+  label: string;
+  /** Leading icon key, resolved to a glyph in the UI. */
+  icon: ToolIconKey;
+  status: BrowserStepStatus;
+}
+
+/**
+ * The built-in browser's live working card, rendered above the assistant's
+ * answer. Streamed updates REPLACE the entry with the same `id` (each emit is a
+ * FULL snapshot: running → accumulating trace → done|failed), so the id is stable
+ * across the turn. Mirrors {@link SubagentActivity}'s upsert-by-id contract; a P0
+ * turn produces a single card with id "browser-0".
+ */
+export interface BrowserActivity {
+  /** Stable id for the browsing card within this turn, e.g. "browser-0". */
+  id: string;
+  status: BrowserStepStatus;
+  /** Current page URL after the latest action. */
+  url?: string;
+  /** Current page title after the latest action. */
+  title?: string;
+  /** A compact live/final note: the current or most recent action. */
+  action?: string;
+  /** Latest page screenshot as a data URL, shown in the panel (diagnostic-only). */
+  thumbnailDataUrl?: string;
+  /** Number of browser actions taken so far (live counter). */
+  steps?: number;
+  /** The ordered action timeline, appended one step per tool call. */
+  trace?: BrowserTraceStep[];
+  /** Epoch-ms when browsing started (powers the live elapsed timer). */
+  startedAt?: number;
+  /** Epoch-ms when the browsing card settled (done|failed); absent while running. */
+  endedAt?: number;
+}
+
+/**
+ * Accumulated built-in-browser state, persisted (JSON) on the assistant message
+ * so the panel rehydrates after a reload. Mirrors {@link SubagentState}.
+ */
+export interface BrowserState {
+  /** The browsing card(s) for this turn (one, "browser-0", in P0). */
+  activities: BrowserActivity[];
 }
 
 /**
@@ -442,6 +504,14 @@ export type StreamEvent =
    * src/lib/subagents/runner.ts), not by the SDK event loop.
    */
   | { type: "subagent_activity"; activity: SubagentActivity }
+  /**
+   * Built-in browser control: a live update for the browsing card. An update
+   * with an existing `activity.id` REPLACES the prior one (running →
+   * done|failed); a new id appends. Emitted from INSIDE the browser tools via
+   * the RunContext `onEvent` side channel (see src/lib/browser/session.ts), not
+   * by the SDK event loop.
+   */
+  | { type: "browser_activity"; activity: BrowserActivity }
   | { type: "done" }
   | { type: "error"; message: string };
 

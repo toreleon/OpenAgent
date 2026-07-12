@@ -13,6 +13,10 @@ const nextConfig = {
       "linkedom",
       "turndown",
       "unpdf",
+      // Server-only browser automation used by the browser-control tools. Pulls in
+      // Node-only internals + spawns a native Chromium; must not be webpack-bundled.
+      "playwright",
+      "playwright-core",
     ],
     // Next 14 needs this to load src/instrumentation.ts (starts the scheduler ticker).
     instrumentationHook: true,

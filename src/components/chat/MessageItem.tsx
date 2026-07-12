@@ -26,6 +26,7 @@ import { RewindButton } from "@/components/workspace/RewindButton";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ResearchActivity } from "./ResearchActivity";
 import { SubagentActivity } from "./SubagentActivity";
+import { BrowserActivity } from "./BrowserActivity";
 import { IconButton } from "@/components/ui/IconButton";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/components/ui/cn";
@@ -266,6 +267,9 @@ export function MessageItem({
       )}
       {message.subagents && (
         <SubagentActivity subagents={message.subagents} isStreaming={isStreaming} />
+      )}
+      {message.browser && (
+        <BrowserActivity browser={message.browser} isStreaming={isStreaming} />
       )}
       {message.content ? (
         <Markdown content={message.content} />

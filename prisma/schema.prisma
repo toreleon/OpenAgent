@@ -136,6 +136,7 @@ model Message {
   siteRefs       String? // JSON-encoded SiteRef[] — Sites this message built/deployed
   research       String? // JSON-encoded ResearchState — Deep Research plan + activity log
   subagents      String? // JSON-encoded SubagentState — parallel-subagent panel state
+  browser        String? // JSON-encoded BrowserState — built-in browser-control panel state
   // Commit sha in the conversation's shadow-git snapshot store (.workspaces/<id>/
   // .snap.git) captured at the end of this (assistant) turn — the "rewind code
   // state" checkpoint for restoring the workspace to how it was after this turn.

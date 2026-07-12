@@ -13,6 +13,7 @@ import { writeFileTool } from "./write-file";
 import { runShellTool } from "./run-shell";
 import { skillTool } from "./skill";
 import { runSubagentsTool } from "./run-subagents";
+import { browserTools } from "./browser";
 
 /**
  * The full set of tools available to the chat agent. Order is not significant;
@@ -62,6 +63,12 @@ export const agentTools: Tool[] = [
   // /api/chat (like the artifact/site tools) so its progress renders as the rich
   // "Subagents" panel instead of a generic tool card. See src/lib/subagents.
   runSubagentsTool,
+  // Built-in browser control (per-conversation headless Chromium, accessibility-
+  // tree grounding). Intercepted by /api/chat like the artifact/subagent tools so
+  // its live progress renders as the "Browser" panel. Gated OFF by default — only
+  // registered when BROWSER_CONTROL_ENABLED=1 — until the P2 security hardening
+  // (connect-time SSRF proxy + action confirmation) lands. See src/lib/browser.
+  ...(process.env.BROWSER_CONTROL_ENABLED === "1" ? browserTools : []),
 ];
 
 export {
@@ -80,4 +87,5 @@ export {
   runShellTool,
   skillTool,
   runSubagentsTool,
+  browserTools,
 };

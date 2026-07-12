@@ -14,6 +14,7 @@ import {
   type ResearchState,
   type SiteRef,
   type SubagentState,
+  type BrowserState,
   type ToolCallRecord,
   type TraceItem,
   type UpdateConversationRequest,
@@ -66,6 +67,22 @@ function decodeSubagents(value: string | null): SubagentState | undefined {
   }
 }
 
+/** Decode the browser-control JSON column so the panel rehydrates on reload. */
+function decodeBrowser(value: string | null): BrowserState | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as BrowserState;
+    return parsed &&
+      typeof parsed === "object" &&
+      Array.isArray(parsed.activities) &&
+      parsed.activities.length > 0
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** GET /api/conversations/[id] — full conversation with messages (oldest first). */
 export async function GET(_req: Request, { params }: RouteParams) {
   const session = await getServerSession(authOptions);
@@ -105,6 +122,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
     siteRefs: decodeJsonArray<SiteRef>(m.siteRefs),
     research: decodeResearch(m.research),
     subagents: decodeSubagents(m.subagents),
+    browser: decodeBrowser(m.browser),
     createdAt: m.createdAt.toISOString(),
   }));
 
