@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Database, KeyRound, Plus, Power, Trash2, Webhook } from "lucide-react";
+import { Check, Cpu, Database, KeyRound, Plus, Power, Trash2, Webhook } from "lucide-react";
 
 interface BackendConfig {
   enabled: boolean;
@@ -21,6 +21,8 @@ interface Endpoint {
   dailyBudget: number;
 }
 interface DataBundle { kv: KVRow[]; documents: DocRow[]; accounts: AccountRow[] }
+interface FnRow { name: string; code: string; hash: string; armed: boolean; upToDate: boolean; updatedAt: string }
+interface FnBundle { flagEnabled: boolean; globalKill: boolean; functions: FnRow[] }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { cache: "no-store", ...init });
@@ -51,21 +53,24 @@ export function SiteBackendPanel({ siteId }: { siteId: string }) {
   const [secretsEnabled, setSecretsEnabled] = useState(true);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [data, setData] = useState<DataBundle | null>(null);
+  const [fns, setFns] = useState<FnBundle | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newSecret, setNewSecret] = useState({ name: "", value: "" });
 
   const loadConfig = useCallback(() => api<BackendConfig>(`/api/sites/${siteId}/backend`).then(setConfig), [siteId]);
   const loadDetails = useCallback(async () => {
-    const [s, e, d] = await Promise.all([
+    const [s, e, d, f] = await Promise.all([
       api<{ enabled: boolean; names: string[] }>(`/api/sites/${siteId}/secrets`),
       api<{ endpoints: Endpoint[] }>(`/api/sites/${siteId}/endpoints`),
       api<DataBundle>(`/api/sites/${siteId}/data`),
+      api<FnBundle>(`/api/sites/${siteId}/functions`),
     ]);
     setSecrets(s.names);
     setSecretsEnabled(s.enabled);
     setEndpoints(e.endpoints);
     setData(d);
+    setFns(f);
   }, [siteId]);
 
   useEffect(() => {
@@ -213,6 +218,25 @@ export function SiteBackendPanel({ siteId }: { siteId: string }) {
             </div>
           </div>
 
+          {/* Server functions (Phase 4) */}
+          {fns && (fns.functions.length > 0 || fns.flagEnabled) && (
+            <div className="mt-6">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-primary"><Cpu size={13} /> Server functions</h3>
+              {!fns.flagEnabled && (
+                <p className="mt-1 text-xs text-amber-500">Server functions are disabled by the operator (set SITES_FUNCTIONS_ENABLED). Proposed functions won&apos;t run.</p>
+              )}
+              {fns.globalKill && (
+                <p className="mt-1 text-xs text-amber-500">Functions are disabled live by the operator.</p>
+              )}
+              <div className="mt-2 space-y-2">
+                {fns.functions.map((fn) => (
+                  <FunctionRow key={fn.name} fn={fn} siteId={siteId} flagEnabled={fns.flagEnabled} busy={busy} run={run} reload={loadDetails} />
+                ))}
+                {fns.functions.length === 0 && <p className="text-xs text-text-secondary">No functions proposed.</p>}
+              </div>
+            </div>
+          )}
+
           {/* Data */}
           <div className="mt-6">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-primary"><Database size={13} /> Data</h3>
@@ -355,6 +379,68 @@ function EndpointRow({
         >
           {ep.armed ? "Re-arm" : "Arm"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function FunctionRow({
+  fn, siteId, flagEnabled, busy, run, reload,
+}: {
+  fn: FnRow;
+  siteId: string;
+  flagEnabled: boolean;
+  busy: string | null;
+  run: (label: string, fn: () => Promise<unknown>, reload: () => Promise<unknown>) => Promise<void>;
+  reload: () => Promise<unknown>;
+}) {
+  const [open, setOpen] = useState(false);
+  const runnable = fn.armed && fn.upToDate;
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${runnable ? "border-emerald-500/30 bg-emerald-500/5" : "border-border"}`}>
+      <div className="flex items-center gap-2 text-xs">
+        <code className="font-semibold text-text-primary">{fn.name}</code>
+        {runnable ? (
+          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-500"><Check size={11} /> armed</span>
+        ) : fn.armed && !fn.upToDate ? (
+          <span className="text-[11px] text-amber-500">code changed — re-arm to run</span>
+        ) : (
+          <span className="text-[11px] text-amber-500">disarmed — review &amp; arm to run</span>
+        )}
+        <button onClick={() => setOpen((v) => !v)} className="ml-auto text-text-secondary hover:text-text-primary">
+          {open ? "Hide code" : "Review code"}
+        </button>
+        <button
+          onClick={() => run(`del-fn-${fn.name}`, () => api(`/api/sites/${siteId}/functions?name=${encodeURIComponent(fn.name)}`, { method: "DELETE" }), reload)}
+          disabled={busy !== null}
+          className="text-text-secondary hover:text-danger disabled:opacity-50"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+      {open && (
+        <pre className="mt-2 max-h-56 overflow-auto rounded border border-border bg-main p-2 font-mono text-[10px] leading-relaxed text-text-primary">{fn.code}</pre>
+      )}
+      <div className="mt-2 flex items-center gap-2">
+        {runnable ? (
+          <button
+            onClick={() => run(`disarm-${fn.name}`, () => api(`/api/sites/${siteId}/functions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: fn.name, action: "disarm" }) }), reload)}
+            disabled={busy !== null}
+            className="rounded border border-border px-2.5 py-1 text-[11px] text-text-secondary hover:text-danger disabled:opacity-50"
+          >
+            Disarm
+          </button>
+        ) : (
+          <button
+            onClick={() => run(`arm-fn-${fn.name}`, () => api(`/api/sites/${siteId}/functions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: fn.name, expectedHash: fn.hash }) }), reload)}
+            disabled={busy !== null || !flagEnabled}
+            title={!flagEnabled ? "Operator has disabled server functions" : "Approve and arm this exact code"}
+            className="rounded bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {fn.armed ? "Re-arm" : "Arm"}
+          </button>
+        )}
+        <span className="font-mono text-[10px] text-text-secondary">sha256:{fn.hash.slice(0, 12)}…</span>
       </div>
     </div>
   );

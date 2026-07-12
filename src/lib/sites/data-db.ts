@@ -473,6 +473,91 @@ export const siteStore = {
     });
   },
 
+  // ---- Server functions (Phase 4) ----
+
+  /**
+   * Model action: propose a function UNARMED. Re-proposing the SAME code is a
+   * no-op; changed code updates it and re-disarms (owner must re-review), exactly
+   * like proposeEndpoint's disarm-on-change.
+   */
+  async proposeFunction(siteId: string, input: { name: string; code: string }): Promise<void> {
+    const ex = await sitesDataDb.siteFunction.findUnique({
+      where: { siteId_name: { siteId, name: input.name } },
+      select: { code: true },
+    });
+    if (!ex) {
+      await sitesDataDb.siteFunction.create({ data: { siteId, name: input.name, code: input.code } });
+      return;
+    }
+    if (ex.code !== input.code) {
+      await sitesDataDb.siteFunction.update({
+        where: { siteId_name: { siteId, name: input.name } },
+        data: { code: input.code, armedHash: null },
+      });
+    }
+  },
+
+  /** The function row for the runner (code + armed hash). */
+  async getFunction(
+    siteId: string,
+    name: string,
+  ): Promise<{ code: string; armedHash: string | null } | null> {
+    return sitesDataDb.siteFunction.findUnique({
+      where: { siteId_name: { siteId, name } },
+      select: { code: true, armedHash: true },
+    });
+  },
+
+  /** All functions for the owner UI (includes source for the review surface). */
+  async listFunctions(siteId: string) {
+    return sitesDataDb.siteFunction.findMany({
+      where: { siteId },
+      orderBy: { name: "asc" },
+      select: { name: true, code: true, armedHash: true, updatedAt: true },
+      take: 200,
+    });
+  },
+
+  async countFunctions(siteId: string): Promise<number> {
+    return sitesDataDb.siteFunction.count({ where: { siteId } });
+  },
+
+  /**
+   * Owner action: arm a function ONLY if the stored code still hashes to what the
+   * owner reviewed (`expectedHash`). Rejects `stale` otherwise — closing the arm
+   * TOCTOU (code changed between the owner reading it and clicking Arm).
+   */
+  async armFunction(
+    siteId: string,
+    name: string,
+    expectedHash: string,
+  ): Promise<{ ok: true } | { ok: false; reason: "not_found" | "stale" }> {
+    const row = await sitesDataDb.siteFunction.findUnique({
+      where: { siteId_name: { siteId, name } },
+      select: { code: true },
+    });
+    if (!row) return { ok: false, reason: "not_found" };
+    const h = createHash("sha256").update(row.code).digest("hex");
+    if (h !== expectedHash) return { ok: false, reason: "stale" };
+    await sitesDataDb.siteFunction.updateMany({ where: { siteId, name }, data: { armedHash: h } });
+    return { ok: true };
+  },
+
+  /** Owner action: disarm a function (instant per-function live kill). */
+  async disarmFunction(siteId: string, name: string): Promise<void> {
+    await sitesDataDb.siteFunction.updateMany({ where: { siteId, name }, data: { armedHash: null } });
+  },
+
+  async deleteFunction(siteId: string, name: string): Promise<void> {
+    await sitesDataDb.siteFunction.deleteMany({ where: { siteId, name } });
+  },
+
+  /** Operator live kill-switch for the whole function tier. */
+  async functionsGloballyDisabled(): Promise<boolean> {
+    const r = await sitesDataDb.siteFnRuntime.findUnique({ where: { id: "singleton" } });
+    return !!r?.globalDisabled;
+  },
+
   /** Delete ALL data for a Site (called from the app-side Site delete cascade). */
   async purgeSite(siteId: string): Promise<void> {
     await sitesDataDb.$transaction([
@@ -483,6 +568,7 @@ export const siteStore = {
       sitesDataDb.siteAccount.deleteMany({ where: { siteId } }),
       sitesDataDb.siteSecret.deleteMany({ where: { siteId } }),
       sitesDataDb.siteEndpoint.deleteMany({ where: { siteId } }),
+      sitesDataDb.siteFunction.deleteMany({ where: { siteId } }),
     ]);
   },
 

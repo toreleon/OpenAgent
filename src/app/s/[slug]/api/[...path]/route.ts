@@ -35,6 +35,7 @@ import { createHash } from "crypto";
 import { resolveBackendSite } from "@/lib/sites/gate";
 import { siteStore, SiteQuotaExceededError } from "@/lib/sites/data-db";
 import { invokeEndpoint } from "@/lib/sites/proxy";
+import { functionsGloballyEnabled, runSiteFunction } from "@/lib/sites/fn/pool";
 import {
   contentTypeForKey,
   deleteBlob,
@@ -416,6 +417,38 @@ export async function POST(req: Request, { params }: Params) {
     const result = await invokeEndpoint(r.siteId, path[1], params);
     if (!result.ok) return json({ error: result.error }, result.code);
     return json({ status: result.status, body: result.body });
+  }
+
+  // Phase 4 — sandboxed server function: POST /api/fn/<name> { input }.
+  // Gated: operator flag + live kill (functionsGloballyEnabled) + the same
+  // link/deploy/backend gate as everything else, then per-function arm inside
+  // runSiteFunction. Every miss is a uniform 404 (no oracle).
+  if (path[0] === "fn" && path.length === 2) {
+    if (!(await functionsGloballyEnabled())) return notFound();
+    if (!validName(path[1])) return json({ error: "bad_name" }, 400);
+    if (!(await siteStore.checkWriteRate(`fn:${r.siteId}`, ipBlock(req), { windowSec: 60, max: 20 }))) {
+      return json({ error: "rate_limited" }, 429);
+    }
+    if (!(await siteStore.checkWriteRate(`fnbudget:${r.siteId}`, "site", { windowSec: 3600, max: 300 }))) {
+      return json({ error: "rate_limited" }, 429);
+    }
+    const parsed = await readJsonBody(req);
+    if ("deny" in parsed) return parsed.deny;
+    const rec = parsed.value as Record<string, unknown> | null;
+    const id = await getIdentity(req, r.siteId);
+    const account = id.account ? { username: id.account.username } : null;
+    const fnRequest = {
+      method: "POST" as const,
+      path: "/",
+      query: Object.fromEntries(new URL(req.url).searchParams),
+      body: rec && "input" in rec ? rec.input : rec,
+      visitorId: identityPublicId(id.scope),
+      account,
+    };
+    const out = await runSiteFunction(r.siteId, path[1], { scope: id.scope, account }, fnRequest);
+    if (!out.ok) return json({ error: out.error }, out.code, id.setCookie);
+    const status = Math.min(599, Math.max(100, out.value.status ?? 200));
+    return json(out.value.body ?? null, status, id.setCookie);
   }
 
   if (path[0] !== "docs" || path.length !== 2) return notFound();

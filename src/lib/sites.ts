@@ -106,10 +106,12 @@ async function applyBackendManifest(siteId: string, backendRaw: unknown): Promis
   if (!b) return;
   const cols = b["collections"];
   const eps = b["endpoints"];
+  const fns = b["functions"];
   const wants =
     b["kv"] === true ||
     (Array.isArray(cols) && cols.length > 0) ||
-    (Array.isArray(eps) && eps.length > 0);
+    (Array.isArray(eps) && eps.length > 0) ||
+    (Array.isArray(fns) && fns.length > 0);
   if (!wants) return;
   await siteStore.setConfig(siteId, { enabled: true });
   if (Array.isArray(eps)) {
@@ -124,6 +126,22 @@ async function applyBackendManifest(siteId: string, backendRaw: unknown): Promis
           method: methodRaw === "POST" ? "POST" : "GET",
           urlTemplate,
         });
+      }
+    }
+  }
+  // Phase 4: propose server functions UNARMED (inert until the operator enables
+  // the tier AND the owner approves the exact code). Capped at 20/site, 64 KiB each.
+  if (Array.isArray(fns)) {
+    const existing = await siteStore.countFunctions(siteId);
+    let added = 0;
+    for (const raw of fns) {
+      if (existing + added >= 20) break;
+      const f = asRecord(raw);
+      const name = f && typeof f["name"] === "string" ? f["name"] : null;
+      const code = f && typeof f["code"] === "string" ? f["code"] : null;
+      if (name && code && ENDPOINT_NAME_RE.test(name) && code.length <= 64 * 1024) {
+        await siteStore.proposeFunction(siteId, { name, code });
+        added++;
       }
     }
   }

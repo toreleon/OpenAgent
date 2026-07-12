@@ -93,6 +93,30 @@ export const createSiteTool: Tool = tool({
               "approves the exact destination host and fills the secret value in the dashboard. You " +
               "cannot arm them, see secret values, or choose a secret's destination.",
           ),
+        functions: z
+          .array(
+            z.object({
+              name: z
+                .string()
+                .describe("Short name; the page calls Sites.fn('<name>', input)."),
+              code: z
+                .string()
+                .describe(
+                  "JS module: `export default async function handler(request, ctx){ … return " +
+                    "{status, body} }`. May `await Sites.kv/me/docs/call`. NO network/fs/process/" +
+                    "require/import — only the Sites bridge.",
+                ),
+            }),
+          )
+          .nullable()
+          .optional()
+          .describe(
+            "ADVANCED opt-in server compute. Runs SANDBOXED JS server-side, reachable via " +
+              "Sites.fn(name, input), for logic kv/docs/endpoints can't express (server-side " +
+              "aggregation, validation, computed responses). Created DISARMED — runs ONLY after the " +
+              "operator enables the tier AND the owner approves the EXACT code in the dashboard. You " +
+              "cannot enable or arm it. Max 20/site, 64 KiB each.",
+          ),
       })
       .nullable()
       .optional()

@@ -120,6 +120,34 @@ model SiteEndpoint {
   @@index([siteId])
 }
 
+/// A model-authored SERVER FUNCTION (Phase 4, custom-compute power tier). The
+/// MODEL proposes {name, code} UNARMED via create_site; the OWNER arms it by
+/// approving the EXACT source they reviewed (arm carries sha256 of the rendered
+/// code; armFunction rejects if the stored code changed since — closes the arm
+/// TOCTOU). It is un-runnable until armedHash === sha256(storedCode); any code
+/// change re-disarms. Executed in a sandboxed QuickJS-WASM worker (see
+/// src/lib/sites/fn/). This tier is default-OFF at every layer.
+model SiteFunction {
+  id        String   @id @default(cuid())
+  siteId    String
+  name      String
+  code      String // JS source, <=64 KiB, <=20 rows/site (enforced at manifest time)
+  armedHash String? // sha256 the owner approved; null = disarmed
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, name])
+  @@index([siteId])
+}
+
+/// Operator LIVE kill-switch for the whole function tier (no restart needed).
+/// Single row (id="singleton"); cached ~5s in the pool.
+model SiteFnRuntime {
+  id             String   @id @default("singleton")
+  globalDisabled Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+}
+
 /// A named visitor ACCOUNT for a Site (Phase 2b): username + password login on
 /// top of the anonymous visitor identity, so a visitor's data is portable across
 /// devices. Accounts are per-Site (username unique within a siteId). Logged-in

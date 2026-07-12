@@ -85,6 +85,9 @@ const SITES_SHIM = `<script>
     call: function (name, params) {
       return req("POST", "/api/call/" + enc(name), { params: params || {} }).then(function (r) { return r.body; });
     },
+    fn: function (name, input) {
+      return req("POST", "/api/fn/" + enc(name), { input: input || {} });
+    },
     blob: {
       url: function (key) { return "/api/blob?key=" + enc(key); },
       put: function (key, data, contentType) {
