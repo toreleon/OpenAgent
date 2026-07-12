@@ -16,6 +16,7 @@
  * `SiteQuotaExceededError` (rolling back) when a Site would exceed its byte
  * budget — no check-then-write race, no `SUM()` per write.
  */
+import { createHash } from "crypto";
 import { PrismaClient } from "@/generated/sites-data-client";
 
 // ---------------------------------------------------------------------------
@@ -226,6 +227,34 @@ export const siteStore = {
     return { bytes: row?.bytes ?? 0, rows: row?.rows ?? 0 };
   },
 
+  /**
+   * Durable, bounded per-(site, ip-block, window) write limiter. Returns true
+   * when the write is ALLOWED. Buckets live in SiteRateBucket (survive restart,
+   * shared across workers) keyed by a hash so the raw IP is never stored. A
+   * throttled sweep hard-evicts expired rows so the table stays bounded.
+   */
+  async checkWriteRate(
+    siteId: string,
+    ipBlock: string,
+    opts: { windowSec: number; max: number },
+  ): Promise<boolean> {
+    await ensureSitesData();
+    const now = Date.now();
+    const windowIdx = Math.floor(now / (opts.windowSec * 1000));
+    const key = createHash("sha256")
+      .update(`${siteId}|${ipBlock}|${windowIdx}`)
+      .digest("hex")
+      .slice(0, 32);
+    const expiresAt = new Date((windowIdx + 1) * opts.windowSec * 1000);
+    await sweepRateBuckets(now);
+    const row = await sitesDataDb.siteRateBucket.upsert({
+      where: { key },
+      create: { key, count: 1, expiresAt },
+      update: { count: { increment: 1 } },
+    });
+    return row.count <= opts.max;
+  },
+
   /** Delete ALL data for a Site (called from the app-side Site delete cascade). */
   async purgeSite(siteId: string): Promise<void> {
     await sitesDataDb.$transaction([
@@ -255,6 +284,20 @@ export const siteStore = {
     await sitesDataDb.$transaction(async (tx) => body(tx as TxClient, quota));
   },
 };
+
+// Hard-evict expired rate buckets so the table stays bounded, but at most once
+// per minute per process (a full deleteMany on every write would double the
+// write load). The last-sweep timestamp rides globalThis to survive hot-reload.
+async function sweepRateBuckets(now: number): Promise<void> {
+  const g = globalForSitesData as unknown as { lastRateSweep?: number };
+  if (g.lastRateSweep && now - g.lastRateSweep < 60_000) return;
+  g.lastRateSweep = now;
+  try {
+    await sitesDataDb.siteRateBucket.deleteMany({ where: { expiresAt: { lt: new Date(now) } } });
+  } catch {
+    // best-effort GC; a failed sweep must never block a write
+  }
+}
 
 // Prisma's interactive-transaction client type (the client minus the tx-control
 // members). Kept local so the repository is the only place that sees it.

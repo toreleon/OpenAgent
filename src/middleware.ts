@@ -18,13 +18,20 @@ import { slugFromHost } from "@/lib/sites/origin";
  * link-visibility + a CSP sandbox — see src/app/s/[slug]/route.ts). The Sites
  * MANAGEMENT surface (/sites, /api/sites/*) is NOT excluded and stays protected.
  *
- * SUBDOMAIN SERVING (Phase 0): when a request arrives on a SITE host
+ * SUBDOMAIN SERVING (Phase 0/1): when a request arrives on a SITE host
  * (`<slug>.<SITES_DOMAIN>`, see src/lib/sites/origin.ts), it is a public visit to
- * a published Site on its own origin. We rewrite it to the internal `/s/<slug>`
- * serving route and BYPASS auth entirely — a site visitor has no app session and
- * must never be bounced to /login. All other hosts fall through to `withAuth`.
- * When SITES_DOMAIN is unset, `slugFromHost` always returns null and behavior is
- * unchanged (legacy path-based serving).
+ * a published Site on its own origin. We rewrite EVERY path to the internal
+ * `/s/<slug>...` serving route and BYPASS auth entirely — a site visitor has no
+ * app session and must never be bounced to /login. Rewriting *every* path (not
+ * just "/") is what keeps a Site's own `/api/*` data plane on its origin AND
+ * stops a site host from reaching the app's public endpoints (/api/auth, …): on
+ * a site host those become /s/<slug>/api/auth → the site router's 404.
+ *
+ * On the APP host, the previously-"excluded" public paths (auth pages, NextAuth,
+ * registration, cron, and legacy /s/* Site links) are allowed through WITHOUT
+ * auth here in code; everything else goes through `withAuth`. When SITES_DOMAIN
+ * is unset, `slugFromHost` always returns null and this reduces to the app host
+ * branch (legacy behavior).
  */
 const authMiddleware = withAuth({
   pages: {
@@ -32,33 +39,40 @@ const authMiddleware = withAuth({
   },
 });
 
+// APP-host paths that are public (no session required). Matched as an exact path
+// or a path prefixed with the entry + "/". Legacy /s/* is handled separately.
+const PUBLIC_APP_PATHS = ["/login", "/register", "/api/auth", "/api/register", "/api/cron"];
+
+function isPublicAppPath(pathname: string): boolean {
+  return PUBLIC_APP_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 export default function middleware(req: NextRequest, event: NextFetchEvent) {
   const slug = slugFromHost(req.headers.get("host"));
   if (slug) {
+    // SITE host → route the whole request to the published Site on its own origin.
     const url = req.nextUrl.clone();
     const rest = req.nextUrl.pathname === "/" ? "" : req.nextUrl.pathname;
     url.pathname = `/s/${slug}${rest}`;
     return NextResponse.rewrite(url);
   }
+  // APP host.
+  const { pathname } = req.nextUrl;
+  // Legacy path-based Site serving stays public (the route 301s to the subdomain
+  // when SITES_DOMAIN is set, else serves the opaque-origin page).
+  if (pathname.startsWith("/s/")) return NextResponse.next();
+  if (isPublicAppPath(pathname)) return NextResponse.next();
   return authMiddleware(req as NextRequestWithAuth, event);
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except:
-     *  - /login, /register            (auth pages)
-     *  - /api/auth/*                  (NextAuth)
-     *  - /api/register                (public registration)
-     *  - /api/cron                    (external trigger, guarded by CRON_SECRET)
-     *  - /s/*                          (public published Sites; CSP-sandboxed)
-     *  - /_next/*                     (Next.js internals)
-     *  - /favicon.ico, /uploads/*     (static assets / served files)
-     *  - common static file extensions
-     *
-     * NOTE: the `s/` alternative uses a trailing slash so it matches only the
-     * /s/<slug> namespace, never app routes that merely start with "s".
+     * Run middleware on every path EXCEPT static assets, so it can (a) route all
+     * site-host paths to the Site and (b) apply the app-host public/auth split in
+     * code above. Excluded: /_next/*, /favicon.ico, /uploads/*, and common static
+     * file extensions.
      */
-    "/((?!login|register|api/auth|api/register|api/cron|s/|_next/static|_next/image|favicon.ico|uploads|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|woff|woff2|ttf)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|uploads|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|css|js|woff|woff2|ttf)$).*)",
   ],
 };
