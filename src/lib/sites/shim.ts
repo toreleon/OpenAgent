@@ -54,7 +54,7 @@ const SITES_SHIM = `<script>
     },
     me: {
       id: function () {
-        return req("GET", "/api/me").then(function (r) { return r.visitorId; });
+        return req("GET", "/api/me").then(function (r) { return r.id; });
       },
       kv: {
         get: function (collection, key) {
@@ -66,6 +66,20 @@ const SITES_SHIM = `<script>
         "delete": function (collection, key) {
           return req("DELETE", "/api/me/kv/" + enc(collection) + "/" + enc(key)).then(function (r) { return r.deleted; });
         }
+      }
+    },
+    account: {
+      current: function () {
+        return req("GET", "/api/account").then(function (r) { return r.account; });
+      },
+      signup: function (username, password) {
+        return req("POST", "/api/account/signup", { username: username, password: password }).then(function (r) { return r.username; });
+      },
+      login: function (username, password) {
+        return req("POST", "/api/account/login", { username: username, password: password }).then(function (r) { return r.username; });
+      },
+      logout: function () {
+        return req("POST", "/api/account/logout").then(function () { return true; });
       }
     }
   };

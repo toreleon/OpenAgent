@@ -255,6 +255,53 @@ export const siteStore = {
     return row.count <= opts.max;
   },
 
+  // ---- Named accounts (Phase 2b) ----
+
+  /**
+   * Create a per-Site account. Returns the new account, or null when the username
+   * is already taken (unique [siteId, username] conflict). `passwordHash` is
+   * pre-hashed by the caller (see lib/sites/account.ts).
+   */
+  async createAccount(
+    siteId: string,
+    username: string,
+    passwordHash: string,
+  ): Promise<{ id: string; username: string } | null> {
+    try {
+      const row = await sitesDataDb.siteAccount.create({
+        data: { siteId, username, passwordHash },
+        select: { id: true, username: true },
+      });
+      return row;
+    } catch (e) {
+      if (e && typeof e === "object" && (e as { code?: string }).code === "P2002") return null;
+      throw e;
+    }
+  },
+
+  /** Look up an account by username within a Site (includes the hash for login). */
+  async findAccountByUsername(
+    siteId: string,
+    username: string,
+  ): Promise<{ id: string; username: string; passwordHash: string } | null> {
+    return sitesDataDb.siteAccount.findUnique({
+      where: { siteId_username: { siteId, username } },
+      select: { id: true, username: true, passwordHash: true },
+    });
+  },
+
+  /** Look up an account by id within a Site (for resolving a session cookie). */
+  async getAccountById(
+    siteId: string,
+    id: string,
+  ): Promise<{ id: string; username: string } | null> {
+    const row = await sitesDataDb.siteAccount.findFirst({
+      where: { id, siteId },
+      select: { id: true, username: true },
+    });
+    return row;
+  },
+
   /** Delete ALL data for a Site (called from the app-side Site delete cascade). */
   async purgeSite(siteId: string): Promise<void> {
     await sitesDataDb.$transaction([
@@ -262,6 +309,7 @@ export const siteStore = {
       sitesDataDb.siteDocument.deleteMany({ where: { siteId } }),
       sitesDataDb.siteUsage.deleteMany({ where: { siteId } }),
       sitesDataDb.siteBackendConfig.deleteMany({ where: { siteId } }),
+      sitesDataDb.siteAccount.deleteMany({ where: { siteId } }),
     ]);
   },
 

@@ -82,6 +82,21 @@ model SiteUsage {
   rows   Int    @default(0)
 }
 
+/// A named visitor ACCOUNT for a Site (Phase 2b): username + password login on
+/// top of the anonymous visitor identity, so a visitor's data is portable across
+/// devices. Accounts are per-Site (username unique within a siteId). Logged-in
+/// private data is scoped `account:<id>` instead of `visitor:<token>`.
+model SiteAccount {
+  id           String   @id @default(cuid())
+  siteId       String
+  username     String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@unique([siteId, username])
+  @@index([siteId])
+}
+
 /// Durable, bounded rate-limit buckets keyed by hash(siteId|ipBlock|window).
 /// Lives in this DB (not in-process) so limits survive restarts and are shared
 /// across workers; a sweeper hard-evicts expired rows so the table is bounded.

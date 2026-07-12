@@ -31,16 +31,24 @@
  *   GET    /api/docs/<collection>          → { documents:[…] } (newest-first)
  *   POST   /api/docs/<collection>          { data } → { ok, id }(write)
  */
+import { createHash } from "crypto";
 import { resolveBackendSite } from "@/lib/sites/gate";
 import { siteStore, SiteQuotaExceededError } from "@/lib/sites/data-db";
 import { sitesDomain, slugFromHost } from "@/lib/sites/origin";
 import {
   newVisitorToken,
   readVisitorToken,
-  visitorPublicId,
   visitorScope,
   visitorSetCookie,
 } from "@/lib/sites/visitor";
+import {
+  accountClearCookie,
+  accountSetCookie,
+  dummyVerify,
+  hashPassword,
+  readAccountId,
+  verifyPassword,
+} from "@/lib/sites/account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,6 +88,31 @@ function getVisitor(req: Request): { token: string; setCookie?: string } {
   if (existing) return { token: existing };
   const token = newVisitorToken();
   return { token, setCookie: visitorSetCookie(token) };
+}
+
+/**
+ * The EFFECTIVE identity for private data: a logged-in account (scope
+ * `account:<id>`) when a valid `sa` cookie is present and the account still
+ * exists, else the anonymous visitor (scope `visitor:<token>`, minting the `sv`
+ * cookie when new). Private data follows the account across devices.
+ */
+async function getIdentity(
+  req: Request,
+  siteId: string,
+): Promise<{ scope: string; setCookie?: string; account: { id: string; username: string } | null }> {
+  const accountId = readAccountId(req);
+  if (accountId) {
+    const acct = await siteStore.getAccountById(siteId, accountId);
+    if (acct) return { scope: `account:${acct.id}`, account: acct };
+    // Stale session (account deleted) → fall through to anonymous.
+  }
+  const v = getVisitor(req);
+  return { scope: visitorScope(v.token), setCookie: v.setCookie, account: null };
+}
+
+/** A stable, non-secret public id for the current identity scope. */
+function identityPublicId(scope: string): string {
+  return createHash("sha256").update(scope).digest("hex").slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,16 +197,26 @@ export async function GET(req: Request, { params }: Params) {
   if ("deny" in r) return r.deny;
   const path = params.path ?? [];
 
-  // Per-visitor identity + private read (scoped to the sv cookie).
+  // Current account (null when anonymous).
+  if (path[0] === "account" && path.length === 1) {
+    const id = await getIdentity(req, r.siteId);
+    return json({ account: id.account?.username ?? null }, 200, id.setCookie);
+  }
+
+  // Per-visitor identity + private read (scoped to account when logged in).
   if (path[0] === "me") {
-    const v = getVisitor(req);
+    const id = await getIdentity(req, r.siteId);
     if (path.length === 1) {
-      return json({ visitorId: visitorPublicId(v.token) }, 200, v.setCookie);
+      return json(
+        { id: identityPublicId(id.scope), account: id.account?.username ?? null },
+        200,
+        id.setCookie,
+      );
     }
     if (path[1] === "kv" && path.length === 4) {
       if (!validName(path[2]) || !validName(path[3])) return json({ error: "bad_name" }, 400);
-      const raw = await siteStore.kvGet(r.siteId, path[2], path[3], visitorScope(v.token));
-      return json({ value: raw === null ? null : safeParse(raw) }, 200, v.setCookie);
+      const raw = await siteStore.kvGet(r.siteId, path[2], path[3], id.scope);
+      return json({ value: raw === null ? null : safeParse(raw) }, 200, id.setCookie);
     }
     return notFound();
   }
@@ -223,15 +266,15 @@ export async function PUT(req: Request, { params }: Params) {
   const serialized = JSON.stringify(rec.value);
   if (serialized.length > MAX_VALUE_BYTES) return json({ error: "value_too_large" }, 413);
 
-  const visitor = target.private ? getVisitor(req) : null;
-  const scope = visitor ? visitorScope(visitor.token) : "shared";
+  const identity = target.private ? await getIdentity(req, r.siteId) : null;
+  const scope = identity ? identity.scope : "shared";
   try {
     await siteStore.kvPut(r.siteId, target.collection, target.key, serialized, scope);
   } catch (e) {
     if (e instanceof SiteQuotaExceededError) return json({ error: "quota_exceeded" }, 413);
     throw e;
   }
-  return json({ ok: true }, 200, visitor?.setCookie);
+  return json({ ok: true }, 200, identity?.setCookie);
 }
 
 export async function DELETE(req: Request, { params }: Params) {
@@ -248,16 +291,53 @@ export async function DELETE(req: Request, { params }: Params) {
   const limited = await rateGuard(req, r.siteId);
   if (limited) return limited;
 
-  const visitor = target.private ? getVisitor(req) : null;
-  const scope = visitor ? visitorScope(visitor.token) : "shared";
+  const identity = target.private ? await getIdentity(req, r.siteId) : null;
+  const scope = identity ? identity.scope : "shared";
   const deleted = await siteStore.kvDelete(r.siteId, target.collection, target.key, scope);
-  return json({ ok: true, deleted }, 200, visitor?.setCookie);
+  return json({ ok: true, deleted }, 200, identity?.setCookie);
+}
+
+/** Account auth: POST /api/account/{signup,login,logout}. */
+async function handleAccount(req: Request, siteId: string, path: string[]): Promise<Response> {
+  const action = path[1];
+  const limited = await rateGuard(req, siteId);
+  if (limited) return limited;
+
+  if (action === "logout" && path.length === 2) {
+    return json({ ok: true }, 200, accountClearCookie());
+  }
+  if ((action === "signup" || action === "login") && path.length === 2) {
+    const body = await readJsonBody(req);
+    if ("deny" in body) return body.deny;
+    const rec = body.value as Record<string, unknown> | null;
+    const username = typeof rec?.username === "string" ? rec.username.trim() : "";
+    const password = typeof rec?.password === "string" ? rec.password : "";
+    if (!validName(username)) return json({ error: "bad_username" }, 400);
+    if (password.length < 8 || password.length > 200) return json({ error: "weak_password" }, 400);
+
+    if (action === "signup") {
+      const acct = await siteStore.createAccount(siteId, username, await hashPassword(password));
+      if (!acct) return json({ error: "username_taken" }, 409);
+      return json({ ok: true, username: acct.username }, 200, accountSetCookie(acct.id));
+    }
+    // login
+    const acct = await siteStore.findAccountByUsername(siteId, username);
+    let ok = false;
+    if (acct) ok = await verifyPassword(password, acct.passwordHash);
+    else await dummyVerify(password);
+    if (!acct || !ok) return json({ error: "invalid_credentials" }, 401);
+    return json({ ok: true, username: acct.username }, 200, accountSetCookie(acct.id));
+  }
+  return notFound();
 }
 
 export async function POST(req: Request, { params }: Params) {
   const r = await resolve(req, params);
   if ("deny" in r) return r.deny;
   const path = params.path ?? [];
+
+  if (path[0] === "account") return handleAccount(req, r.siteId, path);
+
   if (path[0] !== "docs" || path.length !== 2) return notFound();
   if (!validName(path[1])) return json({ error: "bad_name" }, 400);
 
