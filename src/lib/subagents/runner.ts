@@ -25,10 +25,18 @@ import {
   type RunStreamEvent,
   type Tool,
 } from "@openai/agents";
-import type { ReasoningEffort, SubagentActivity } from "@/lib/types";
+import type {
+  ReasoningEffort,
+  SubagentActivity,
+  SubagentTraceStep,
+} from "@/lib/types";
 import { DEFAULT_EFFORT } from "@/lib/types";
 import { ensureApiKey, resolveModel, guardCompletion } from "@/lib/openaiClient";
-import { extractToolArg, toolActivityLabel } from "@/lib/toolActivity";
+import {
+  extractToolArg,
+  toolActivityIcon,
+  toolActivityLabel,
+} from "@/lib/toolActivity";
 // Import each worker tool directly from its module (NOT from "@/lib/tools",
 // whose index re-exports `run_subagents` → runner and would cycle).
 import { webSearchFunctionTool } from "@/lib/tools/web-search";
@@ -157,6 +165,11 @@ function firstLine(text: string, max = 140): string {
 // One worker
 // ---------------------------------------------------------------------------
 
+/** Flip any still-"running" trace step to "done" (the next action has begun). */
+function closeTrace(trace: SubagentTraceStep[]): void {
+  for (const s of trace) if (s.status === "running") s.status = "done";
+}
+
 async function runOne(
   index: number,
   task: SubagentTask,
@@ -165,10 +178,30 @@ async function runOne(
   const id = `sub-${index}`;
   const effort: ReasoningEffort = opts.effort ?? DEFAULT_EFFORT;
   let steps = 0;
+  // The worker's full tool timeline, accumulated one step per tool call so the
+  // working-view card can be expanded to show everything it did. `startedAt` is
+  // stamped now (the worker is leaving the queue and beginning to run).
+  const trace: SubagentTraceStep[] = [];
+  const startedAt = Date.now();
 
-  // Emit reads the live `steps` at call time (closures capture the binding).
+  // Emit a FULL snapshot: reads the live `steps`/`trace` at call time (closures
+  // capture the bindings). On a terminal status we close the trailing trace step
+  // and stamp `endedAt` so the card shows a final, reload-stable duration.
   const emit = (status: SubagentActivity["status"], detail?: string) => {
-    opts.onActivity?.({ id, title: task.title, status, steps, detail });
+    const settled = status !== "running";
+    if (settled) closeTrace(trace);
+    opts.onActivity?.({
+      id,
+      title: task.title,
+      status,
+      steps,
+      detail,
+      // Deep-copy so a later in-place mutation of `trace` can't retroactively
+      // alter a snapshot already handed to the store/SSE stream.
+      trace: trace.length ? trace.map((s) => ({ ...s })) : undefined,
+      startedAt,
+      endedAt: settled ? Date.now() : undefined,
+    });
   };
 
   emit("running", "Starting…");
@@ -240,8 +273,12 @@ async function runOne(
         const name =
           readString(raw, "name") ?? readString(event.item, "name") ?? "tool";
         const arg = extractToolArg(name, parseArgs(readString(raw, "arguments")));
+        const label = toolActivityLabel(name, arg, "running");
         steps++;
-        emit("running", toolActivityLabel(name, arg, "running"));
+        // The previous action is now finished; append this one as the live step.
+        closeTrace(trace);
+        trace.push({ label, icon: toolActivityIcon(name), status: "running" });
+        emit("running", label);
       }
     }
 

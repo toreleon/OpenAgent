@@ -3,6 +3,8 @@
  * Every agent imports the relevant symbols from "@/lib/types".
  */
 
+import type { ToolIconKey } from "@/lib/toolActivity";
+
 // ---------------------------------------------------------------------------
 // Core chat primitives
 // ---------------------------------------------------------------------------
@@ -178,11 +180,29 @@ export interface ResearchState {
 export type SubagentStatus = "running" | "done" | "failed";
 
 /**
- * One worker in a parallel-subagent batch, rendered as a live row in the
- * "Subagents" activity panel above the orchestrator's synthesized answer.
- * Streamed updates REPLACE the entry with the same `id` (running → its live
- * step notes → done|failed), so the id must be stable across the worker's
- * lifecycle. Mirrors {@link ResearchActivity}'s upsert-by-id contract.
+ * One step in a subagent's live working trace — a single tool action it took,
+ * shown as a row when the worker's card is expanded in the working view. `label`
+ * is the friendly, already-tensed phrasing (e.g. "Searched the web for …") and
+ * `icon` selects the leading glyph. A step is `running` while the tool is
+ * in-flight and flips to `done` once the next tool starts (or the worker
+ * settles). Mirrors the timeline's tool-activity rows, scoped to one worker.
+ */
+export interface SubagentTraceStep {
+  /** Friendly, tensed label for the tool action (from {@link toolActivityLabel}). */
+  label: string;
+  /** Leading icon key (from {@link toolActivityIcon}), resolved to a glyph in the UI. */
+  icon: ToolIconKey;
+  /** `running` while the tool is in-flight; `done` once the next step begins. */
+  status: "running" | "done";
+}
+
+/**
+ * One worker in a parallel-subagent batch, rendered as a live CARD in the
+ * "Subagents" working view above the orchestrator's synthesized answer.
+ * Streamed updates REPLACE the entry with the same `id` (each emit is a FULL
+ * snapshot: running → accumulating trace → done|failed), so the id must be
+ * stable across the worker's lifecycle. Mirrors {@link ResearchActivity}'s
+ * upsert-by-id contract.
  */
 export interface SubagentActivity {
   /** Stable id for this worker within the batch, e.g. "sub-0". */
@@ -197,6 +217,23 @@ export interface SubagentActivity {
    * (e.g. "Searching the web for …"), or a one-line result/error once settled.
    */
   detail?: string;
+  /**
+   * The worker's full ordered tool timeline, appended one step per tool call, so
+   * the working-view card can be expanded to show everything it did (not just
+   * the latest step). Absent until the worker makes its first tool call.
+   */
+  trace?: SubagentTraceStep[];
+  /**
+   * Epoch-ms when the worker actually STARTED running (absent while it is still
+   * queued behind the concurrency limit). Powers the live per-agent elapsed
+   * timer; the UI counts up from here until {@link endedAt}.
+   */
+  startedAt?: number;
+  /**
+   * Epoch-ms when the worker SETTLED (done|failed); absent while running. With
+   * {@link startedAt} this yields the final, reload-stable run duration.
+   */
+  endedAt?: number;
 }
 
 /**

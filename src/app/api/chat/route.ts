@@ -123,8 +123,14 @@ function encodeSubagents(agents: SubagentActivity[]): string | null {
  * {@link finalizeTimeline}.
  */
 function finalizeSubagents(agents: SubagentActivity[]): void {
+  const now = Date.now();
   for (const a of agents) {
-    if (a.status === "running") a.status = "failed";
+    if (a.status !== "running") continue;
+    a.status = "failed";
+    // Bound the persisted duration and close any trailing in-flight trace step so
+    // the working-view card rehydrates settled rather than mid-action.
+    if (a.startedAt && a.endedAt === undefined) a.endedAt = now;
+    if (a.trace) for (const s of a.trace) if (s.status === "running") s.status = "done";
   }
 }
 

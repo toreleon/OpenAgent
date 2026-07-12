@@ -1139,6 +1139,7 @@ function failRunningTools(timeline: TraceItem[]) {
  * finalized state (finalizeSubagents). No-op when nothing is running.
  */
 function failRunningSubagents(id: string, set: SetState) {
+  const now = Date.now();
   set((s) => ({
     messages: s.messages.map((m) => {
       if (m.id !== id || !m.subagents?.agents?.length) return m;
@@ -1148,7 +1149,17 @@ function failRunningSubagents(id: string, set: SetState) {
         subagents: {
           ...m.subagents,
           agents: m.subagents.agents.map((a) =>
-            a.status === "running" ? { ...a, status: "failed" as const } : a,
+            a.status === "running"
+              ? {
+                  ...a,
+                  status: "failed" as const,
+                  // Freeze the live timer and close any in-flight trace step.
+                  endedAt: a.startedAt ? (a.endedAt ?? now) : a.endedAt,
+                  trace: a.trace?.map((t) =>
+                    t.status === "running" ? { ...t, status: "done" as const } : t,
+                  ),
+                }
+              : a,
           ),
         },
       };
