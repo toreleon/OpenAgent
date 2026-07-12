@@ -7,7 +7,10 @@ import {
   FileDiff,
   FolderGit2,
   ListTree,
+  MessagesSquare,
   RefreshCw,
+  SendHorizonal,
+  Sparkles,
   X,
 } from "lucide-react";
 import { useChatStore } from "@/store/chat";
@@ -18,7 +21,9 @@ import { DiffFileCard } from "./DiffFileCard";
 import { FileTree } from "./FileTree";
 import { highlightLine } from "./diffHighlight";
 import { AddDelCounts } from "./bits";
+import type { DiffCommentApi } from "./DiffView";
 import type {
+  DraftComment,
   WorkspaceFileContent,
   WorkspaceFileDiff,
   WorkspaceScope,
@@ -40,9 +45,14 @@ export function WorkspacePanel() {
   const closeWorkspace = useChatStore((s) => s.closeWorkspace);
   const setWorkspaceScope = useChatStore((s) => s.setWorkspaceScope);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const sendMessage = useChatStore((s) => s.sendMessage);
 
   const scope: WorkspaceScope = view?.scope ?? "all";
   const messageId = view?.messageId ?? undefined;
+
+  // Draft inline review comments (Claude-Code-style), submitted together to the
+  // agent as a follow-up turn.
+  const [comments, setComments] = useState<DraftComment[]>([]);
 
   const [mode, setMode] = useState<Mode>("changes");
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
@@ -93,9 +103,11 @@ export function WorkspacePanel() {
     }
   }, [conversationId, scope, messageId]);
 
-  // Start every file expanded again when the scope/conversation/turn changes.
+  // Start every file expanded again + drop draft comments when the
+  // scope/conversation/turn changes.
   useEffect(() => {
     setCollapsed(new Set());
+    setComments([]);
   }, [conversationId, scope, messageId]);
 
   // Load on open + scope change (via `load` identity) and on streaming flips
@@ -164,6 +176,78 @@ export function WorkspacePanel() {
 
   const canLastTurn = !!status?.lastTurnMessageId || scope === "lastTurn";
 
+  // ---- inline review comments ----
+  const commentApiFor = useCallback(
+    (path: string): DiffCommentApi => ({
+      byId: new Map(
+        comments.filter((c) => c.path === path).map((c) => [c.id, c]),
+      ),
+      add: (anchor) =>
+        setComments((prev) =>
+          prev.some((c) => c.id === anchor.id)
+            ? prev
+            : [...prev, { ...anchor, path, text: "" }],
+        ),
+      update: (id, text) =>
+        setComments((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, text } : c)),
+        ),
+      remove: (id) => setComments((prev) => prev.filter((c) => c.id !== id)),
+    }),
+    [comments],
+  );
+
+  const readyComments = comments.filter((c) => c.text.trim().length > 0);
+
+  const submitComments = useCallback(() => {
+    const ready = comments.filter((c) => c.text.trim().length > 0);
+    if (ready.length === 0 || isStreaming) return;
+    const byFile = new Map<string, DraftComment[]>();
+    for (const c of ready) {
+      const arr = byFile.get(c.path) ?? [];
+      arr.push(c);
+      byFile.set(c.path, arr);
+    }
+    let prompt =
+      "Please revise your changes in the workspace to address these code-review comments:\n";
+    for (const [path, cs] of byFile) {
+      prompt += `\n**${path}**\n`;
+      for (const c of cs) {
+        prompt += `- ${c.lineLabel} \`${c.lineContent.trim()}\` — ${c.text.trim()}\n`;
+      }
+    }
+    setComments([]);
+    void sendMessage(prompt, []);
+    // Show cumulative changes so the agent's revision is visible as it streams
+    // (the pinned last-turn scope wouldn't include the new turn).
+    setWorkspaceScope("all");
+  }, [comments, isStreaming, sendMessage, setWorkspaceScope]);
+
+  const reviewCode = useCallback(() => {
+    if (isStreaming) return;
+    const scopeText =
+      scope === "lastTurn"
+        ? "your most recent turn's changes"
+        : "all your changes so far";
+    void sendMessage(
+      `Please review ${scopeText} in this workspace. Re-read the files you changed and critically check for correctness bugs, security issues, and missing edge cases. For each issue, cite the file and line and suggest a fix; if the code is solid, say so briefly. Then apply any high-confidence fixes.`,
+      [],
+    );
+  }, [isStreaming, scope, sendMessage]);
+
+  // ⌘/Ctrl+Enter submits the batch of comments.
+  useEffect(() => {
+    if (readyComments.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        submitComments();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [readyComments.length, submitComments]);
+
   return (
     <div className="flex h-full w-full flex-col bg-main text-text-primary">
       {/* Header */}
@@ -217,6 +301,15 @@ export function WorkspacePanel() {
 
         {mode === "changes" && diffs.length > 0 && (
           <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={reviewCode}
+              disabled={isStreaming}
+              title="Ask the agent to review its own changes"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Sparkles size={12} /> Review code
+            </button>
             <IconButton
               label="Expand all"
               size="sm"
@@ -271,6 +364,7 @@ export function WorkspacePanel() {
                       if (el) cardRefs.current.set(d.path, el);
                       else cardRefs.current.delete(d.path);
                     }}
+                    comments={commentApiFor(d.path)}
                   />
                 ))}
               </div>
@@ -280,6 +374,35 @@ export function WorkspacePanel() {
           )}
         </div>
       </div>
+
+      {/* Submit-comments bar (Claude-Code inline-review round-trip) */}
+      {comments.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-border bg-hover/30 px-3 py-2">
+          <MessagesSquare size={15} className="shrink-0 text-text-secondary" />
+          <span className="text-xs text-text-secondary">
+            {readyComments.length} comment{readyComments.length === 1 ? "" : "s"}
+            {comments.length > readyComments.length &&
+              ` (${comments.length - readyComments.length} empty)`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setComments([])}
+            className="ml-auto rounded-md px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={submitComments}
+            disabled={readyComments.length === 0 || isStreaming}
+            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <SendHorizonal size={13} />
+            Submit to agent
+            <span className="opacity-70">⌘⏎</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

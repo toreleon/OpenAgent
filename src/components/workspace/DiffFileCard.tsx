@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/components/ui/cn";
-import { DiffView } from "./DiffView";
+import { DiffView, type DiffCommentApi } from "./DiffView";
 import { StatusBadge, AddDelCounts, PathLabel } from "./bits";
 import type { WorkspaceFileDiff } from "@/lib/workspace/types";
 
@@ -16,12 +16,15 @@ export function DiffFileCard({
   expanded,
   onToggle,
   registerRef,
+  comments,
 }: {
   diff: WorkspaceFileDiff;
   expanded: boolean;
   onToggle: () => void;
   /** Lets the panel scroll a card into view when its file is selected. */
   registerRef?: (el: HTMLDivElement | null) => void;
+  /** Inline-comment API scoped to this file (omit to disable commenting). */
+  comments?: DiffCommentApi;
 }) {
   return (
     <div
@@ -45,7 +48,12 @@ export function DiffFileCard({
       </button>
       {expanded && (
         <div className={cn("border-t border-border")}>
-          <DiffView hunks={diff.hunks} language={diff.language} />
+          <DiffView
+            hunks={diff.hunks}
+            language={diff.language}
+            path={diff.path}
+            comments={comments}
+          />
         </div>
       )}
     </div>

@@ -32,6 +32,20 @@ export interface WorkspaceFileDiff {
 /** Review scope: everything since the empty baseline, or just one turn. */
 export type WorkspaceScope = "all" | "lastTurn";
 
+/** A draft inline review comment anchored to one diff line, before it's
+ *  submitted to the agent as a follow-up turn (Claude-Code-style). */
+export interface DraftComment {
+  /** Stable anchor id: `${path}::${hunkIndex}::${lineIndex}`. */
+  id: string;
+  path: string;
+  /** Human line label for the prompt, e.g. "L2". */
+  lineLabel: string;
+  /** The diff line's text, quoted back to the agent for context. */
+  lineContent: string;
+  /** The reviewer's comment text. */
+  text: string;
+}
+
 /** GET /api/conversations/[id]/workspace response. */
 export interface WorkspaceStatus {
   changes: WorkspaceFileChange[];
