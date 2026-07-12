@@ -17,7 +17,7 @@ import type {
 import { DEFAULT_EFFORT } from "@/lib/types";
 import { agentTools } from "@/lib/tools";
 import { loadUserMcpServers } from "@/lib/mcp";
-import { ensureApiKey, resolveModel } from "@/lib/openaiClient";
+import { ensureApiKey, resolveModel, guardCompletion } from "@/lib/openaiClient";
 import type { MCPServer } from "@openai/agents-core";
 
 /**
@@ -356,14 +356,10 @@ export async function* streamChat(
       },
     });
 
-    // Attach an eager no-op catch to `.completed`: the SDK rejects it the instant
-    // the run fails (e.g. MaxTurnsExceeded), which can happen while the for-await
-    // loop below is still draining events — before we `await completed`. Without a
-    // handler already attached, that rejection surfaces as an unhandledRejection
-    // and crashes the Node process. The `await completed` below still throws into
-    // our catch so the error is reported to the client as normal.
-    const completed = streamed.completed;
-    completed.catch(() => {});
+    // Guard `.completed` so a late rejection (e.g. MaxTurnsExceeded) during the
+    // drain below can't become an unhandledRejection; `await completed` still
+    // throws into our catch so the error reaches the client as normal.
+    const completed = guardCompletion(streamed);
 
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
       if (event.type === "raw_model_stream_event") {
@@ -622,10 +618,7 @@ export async function* streamCompletion(
   let reasoningDone = false;
   try {
     const streamed = await run(agent, [user(params.user)], { stream: true });
-    // Eager no-op catch so a `.completed` rejection during the loop drain can't
-    // become an unhandledRejection (see streamChat); `await completed` still throws.
-    const completed = streamed.completed;
-    completed.catch(() => {});
+    const completed = guardCompletion(streamed);
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
       if (event.type !== "raw_model_stream_event") continue;
       const data = event.data as {

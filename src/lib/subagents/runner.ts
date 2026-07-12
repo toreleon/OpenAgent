@@ -27,7 +27,7 @@ import {
 } from "@openai/agents";
 import type { ReasoningEffort, SubagentActivity } from "@/lib/types";
 import { DEFAULT_EFFORT } from "@/lib/types";
-import { ensureApiKey, resolveModel } from "@/lib/openaiClient";
+import { ensureApiKey, resolveModel, guardCompletion } from "@/lib/openaiClient";
 import { extractToolArg, toolActivityLabel } from "@/lib/toolActivity";
 // Import each worker tool directly from its module (NOT from "@/lib/tools",
 // whose index re-exports `run_subagents` → runner and would cycle).
@@ -216,15 +216,10 @@ async function runOne(
       },
     });
 
-    // The SDK rejects `.completed` the instant the run fails (e.g. a worker that
-    // loops until MaxTurnsExceededError). That rejection can land WHILE the
-    // for-await loop below is still draining buffered events — i.e. before we
-    // reach `await completed`. A rejected promise with no handler attached
-    // triggers Node's `unhandledRejection`, which crashes the dev server. Capture
-    // the promise once and attach an eager no-op catch so it is always "handled";
-    // the `await completed` below still surfaces the real error to our catch.
-    const completed = streamed.completed;
-    completed.catch(() => {});
+    // Guard the completion promise so a late rejection — e.g. this worker hitting
+    // MaxTurnsExceededError — during the drain below can't crash the process; the
+    // `await completed` still surfaces the real error to our catch.
+    const completed = guardCompletion(streamed);
 
     for await (const event of streamed as AsyncIterable<RunStreamEvent>) {
       if (event.type === "raw_model_stream_event") {

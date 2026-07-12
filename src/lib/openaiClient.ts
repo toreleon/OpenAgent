@@ -65,3 +65,20 @@ export function ensureApiKey(): boolean {
 export function resolveModel(requested: string): string {
   return process.env.OPENAI_MODEL || requested;
 }
+
+/**
+ * Guard a streamed run's `.completed` promise, then return it.
+ *
+ * The Agents SDK rejects `.completed` the instant the run fails (e.g.
+ * MaxTurnsExceeded). That rejection can land WHILE the caller is still draining
+ * the event iterator — before it reaches `await completed`. A rejected promise
+ * with no handler already attached triggers Node's `unhandledRejection`, which
+ * crashes the process. Attaching an eager no-op catch marks it "handled"; the
+ * returned promise is the SAME one, so `await`-ing it still surfaces the real
+ * error to the caller's try/catch as normal.
+ */
+export function guardCompletion<T>(streamed: { completed: Promise<T> }): Promise<T> {
+  const { completed } = streamed;
+  completed.catch(() => {});
+  return completed;
+}
