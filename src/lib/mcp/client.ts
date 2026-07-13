@@ -25,7 +25,7 @@ type CallToolResultContent = Awaited<ReturnType<MCPServer["callTool"]>>;
  */
 const REQUEST_TIMEOUT_MS = 10_000;
 const PROTOCOL_VERSION = "2025-06-18";
-const CLIENT_INFO = { name: "chatgpt-clone", version: "1.0.0" };
+const CLIENT_INFO = { name: "openagent", version: "1.0.0" };
 
 /** JSON-RPC error thrown by {@link RemoteMCPServer.rpc}. */
 class JsonRpcError extends Error {

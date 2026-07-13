@@ -1,5 +1,5 @@
 /**
- * Global custom instructions ("Customize ChatGPT") composed into the system
+ * Global custom instructions ("Customize OpenAgent") composed into the system
  * prompt for every chat when enabled. The chat route loads this via
  * {@link loadUserContext} and merges it with any project context before passing
  * it to the agent — mirroring src/lib/projects/prompt.ts.

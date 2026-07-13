@@ -26,8 +26,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "ChatGPT",
-  description: "A ChatGPT clone built with Next.js and the OpenAI Agents SDK.",
+  title: "OpenAgent",
+  description: "OpenAgent — built with Next.js and the OpenAI Agents SDK.",
 };
 
 export const viewport: Viewport = {

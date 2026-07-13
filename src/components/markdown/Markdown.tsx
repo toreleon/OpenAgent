@@ -16,7 +16,7 @@ import { cn } from "@/components/ui/cn";
 
 /**
  * Normalize LaTeX delimiters before parsing. `remark-math` only recognizes
- * `$...$` / `$$...$$`, but models (ChatGPT-style) frequently emit `\(...\)` for
+ * `$...$` / `$$...$$`, but models frequently emit `\(...\)` for
  * inline and `\[...\]` for display math. Convert those to the dollar forms.
  *
  * We split on fenced/inline code first and only transform the non-code

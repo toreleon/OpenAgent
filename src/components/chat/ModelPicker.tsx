@@ -13,7 +13,7 @@ export interface ModelPickerProps {
   align?: "start" | "end";
 }
 
-/** ChatGPT-style model selector dropdown sourced from MODELS. */
+/** Model selector dropdown sourced from MODELS. */
 export function ModelPicker({
   value,
   onChange,

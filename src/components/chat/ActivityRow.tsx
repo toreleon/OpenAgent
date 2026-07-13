@@ -38,11 +38,11 @@ const ICONS: Record<ReturnType<typeof toolActivityIcon>, LucideIcon> = {
 };
 
 /**
- * One ChatGPT-style tool-activity row inside the Thinking trace: a small icon +
+ * One tool-activity row inside the Thinking trace: a small icon +
  * a friendly, human label ("Searched the web for …"), never the internal tool
  * name or raw JSON. A spinner marks a call still running; on completion the
  * tool's own icon returns and the label flips to past tense (no green check —
- * done-ness is conveyed by the wording, matching ChatGPT's reasoning trace).
+ * done-ness is conveyed by the wording).
  */
 export function ActivityRow({ item }: { item: ToolItem }) {
   const label = toolActivityLabel(item.tool, item.arg, item.status);

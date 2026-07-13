@@ -54,7 +54,7 @@ export function AccountTab({ onClose }: { onClose: () => void }) {
     <SettingsPanel title="Account">
       <SettingRow
         label="Plan"
-        description="ChatGPT Free"
+        description="OpenAgent Free"
         control={
           <RowButton onClick={() => {}} disabled>
             Upgrade

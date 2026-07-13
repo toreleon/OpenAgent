@@ -29,7 +29,7 @@ export interface ProjectDetailProps {
   projectId: string;
 }
 
-/** ChatGPT-style project home: chat-first, centered column. */
+/** Project home: chat-first, centered column. */
 export function ProjectDetail({ projectId }: ProjectDetailProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);

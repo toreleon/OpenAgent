@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript types used across the entire ChatGPT clone.
+ * Shared TypeScript types used across OpenAgent.
  * Every agent imports the relevant symbols from "@/lib/types".
  */
 
@@ -38,8 +38,8 @@ export interface ToolCallRecord {
 
 /**
  * One item in an assistant turn's ordered "thinking" timeline — the interleaved,
- * chronological record of reasoning summaries and tool activity that ChatGPT
- * shows above the answer (and collapses to "Thought for Ns"). The `seq`-ordered
+ * chronological record of reasoning summaries and tool activity that is
+ * shown above the answer (and collapses to "Thought for Ns"). The `seq`-ordered
  * array is the canonical, reload-safe shape: a reasoning chunk produced AFTER a
  * tool call carries a later position and renders after that tool's row, so
  * think→act→think interleaving survives persistence. Kept deliberately lean
@@ -69,7 +69,7 @@ export interface ChatMessage {
   role: ChatRole;
   /**
    * Parent message id in the conversation TREE, or null for a root message.
-   * ChatGPT-style editing a user message / regenerating an assistant reply
+   * Editing a user message / regenerating an assistant reply
    * creates a NEW sibling under the same parent, so a parent's children are the
    * selectable "versions". The visible conversation is the chain of parents from
    * the conversation's active leaf up to a root. Absent on legacy in-flight
@@ -388,7 +388,7 @@ export const DEFAULT_MODEL = MODELS[0].id;
  * effective model `gpt-5.4-mini` (deployment `gpt-5.4-mini-2026-03-17`):
  * the model REJECTS `'minimal'` with a 400 (`unsupported_value`) and accepts
  * `'none' | 'low' | 'medium' | 'high' | 'xhigh'`. We expose the four standard
- * ChatGPT-style tiers below (`low | medium | high`) plus `minimal`, which the
+ * standard tiers below (`low | medium | high`) plus `minimal`, which the
  * SDK/OpenAI types allow but THIS model rejects — see the comment on `minimal`.
  */
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
@@ -407,7 +407,7 @@ export interface ReasoningEffortOption {
 }
 
 /**
- * Reasoning-effort tiers shown in the picker, ChatGPT-style.
+ * Reasoning-effort tiers shown in the picker.
  *
  * NOTE: `minimal` is marked `supported: false` because the verified effective
  * model (`gpt-5.4-mini`) 400s on it. It is kept in the type/list so the picker
@@ -616,7 +616,7 @@ export interface ApiError {
 }
 
 // ---------------------------------------------------------------------------
-// MCP connectors (remote MCP servers, ChatGPT-style)
+// MCP connectors (remote MCP servers)
 // ---------------------------------------------------------------------------
 
 /**
@@ -816,7 +816,7 @@ export interface ArtifactSnapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Sites (ChatGPT-Sites-style publishable web pages)
+// Sites (Sites-style publishable web pages)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1164,7 +1164,7 @@ export interface CronTriggerResult {
 }
 
 // ---------------------------------------------------------------------------
-// Projects (ChatGPT/Claude-style workspaces)
+// Projects (workspaces)
 // ---------------------------------------------------------------------------
 
 /** Semantic icon choices offered when creating or editing a project. */
@@ -1276,21 +1276,21 @@ export const MAX_PROJECT_FILES = 20;
 export const MAX_PROJECT_KNOWLEDGE_CHARS = 100_000;
 
 // ---------------------------------------------------------------------------
-// User settings & profile (ChatGPT-style Settings)
+// User settings & profile (Settings)
 // ---------------------------------------------------------------------------
 
 /**
- * Global custom instructions ("Customize ChatGPT"). When `enabled`, these are
+ * Global custom instructions ("Customize OpenAgent"). When `enabled`, these are
  * composed into the system prompt for every chat (see src/lib/user/prompt.ts).
  */
 export interface CustomInstructions {
-  /** "What should ChatGPT call you?" */
+  /** "What should OpenAgent call you?" */
   nickname: string;
   /** "What do you do?" */
   occupation: string;
-  /** "What traits should ChatGPT have?" */
+  /** "What traits should OpenAgent have?" */
   traits: string;
-  /** "Anything else ChatGPT should know?" */
+  /** "Anything else OpenAgent should know?" */
   about: string;
   /** "Enable for new chats". */
   enabled: boolean;

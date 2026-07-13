@@ -21,7 +21,7 @@ import { cn } from "@/components/ui/cn";
 import { ProjectForm } from "./ProjectForm";
 import { ProjectIcon, relativeTime } from "./projectVisuals";
 
-/** ChatGPT-style Projects overview: a clean list of the user's projects. */
+/** Projects overview: a clean list of the user's projects. */
 export function ProjectsApp() {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);

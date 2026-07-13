@@ -1,7 +1,7 @@
 /**
  * Server-side Site persistence, versioning, and publishing.
  *
- * A Site (ChatGPT-Sites-style) is a first-class, USER-owned, publishable web
+ * A Site (Sites-style) is a first-class, USER-owned, publishable web
  * page. Unlike an Artifact it is not bound to a conversation — it survives chat
  * deletion (`createdInConversationId` is provenance only). Content lives on a
  * mutable `draft*` buffer; "Save a Version" snapshots the draft into an immutable

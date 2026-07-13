@@ -10,7 +10,7 @@
  */
 
 :root {
-  /* ChatGPT-like dark palette expressed as raw RGB channels for Tailwind <alpha-value> */
+  /* Dark palette expressed as raw RGB channels for Tailwind <alpha-value> */
   --color-sidebar: 23 23 23; /* #171717 */
   --color-main: 33 33 33; /* #212121 */
   --color-user-bubble: 47 47 47; /* #2f2f2f */
@@ -62,7 +62,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Scrollbar styling (ChatGPT-like, thin and subtle) */
+/* Scrollbar styling (thin and subtle) */
 * {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--color-border)) transparent;

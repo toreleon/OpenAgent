@@ -22,17 +22,17 @@ export interface ComposerFullProps extends ComposerProps {
   /** Optional externally-provided initial text (e.g. from a suggestion card). */
   draft?: string;
   onDraftConsumed?: () => void;
-  /** Hide the "ChatGPT can make mistakes" line (e.g. on the project home). */
+  /** Hide the "OpenAgent can make mistakes" line (e.g. on the project home). */
   hideDisclaimer?: boolean;
 }
 
-/** ChatGPT-style bottom input bar with auto-growing textarea + attachments. */
+/** Bottom input bar with auto-growing textarea + attachments. */
 export function Composer({
   onSend,
   isStreaming,
   onStop,
   disabled,
-  placeholder = "Message ChatGPT",
+  placeholder = "Message OpenAgent",
   model,
   onModelChange,
   draft,
@@ -323,7 +323,7 @@ export function Composer({
 
         {!hideDisclaimer && (
           <p className="mt-2 text-center text-xs text-text-secondary">
-            ChatGPT can make mistakes. Check important info.
+            OpenAgent can make mistakes. Check important info.
           </p>
         )}
       </div>

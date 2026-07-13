@@ -1,4 +1,4 @@
-# Integration Contracts — ChatGPT Clone
+# Integration Contracts — OpenAgent
 
 This document is the single source of truth for the 4 parallel feature agents.
 Build against it **verbatim**: route paths, JSON shapes, exported symbol names,
@@ -593,7 +593,7 @@ as `date.toISOString()`.
 
 The effective model (`gpt-5.4-mini`) is a reasoning model. Users pick a
 reasoning effort next to the model picker; the model streams a reasoning
-*summary* which the UI renders in a ChatGPT-style collapsible "Thinking" block
+*summary* which the UI renders in a collapsible "Thinking" block
 above the answer.
 
 ### Wire flow
@@ -785,7 +785,7 @@ persistent Node server) and the `CRON_SECRET`-guarded `/api/cron` endpoint funne
 
 ---
 
-## 11. Projects (ChatGPT/Claude-style workspaces — authoritative)
+## 11. Projects (workspaces — authoritative)
 
 A **Project** groups conversations around a shared purpose and carries **custom
 instructions** + **knowledge files** that are injected into the system prompt for
@@ -837,7 +837,7 @@ unknown/unowned id ignored). Scheduled-run chats have no project.
 - `DELETE /api/projects/[id]` → `{ success: true }`. Order: capture file urls →
   `conversation.deleteMany({ projectId, userId })` (chats+messages+artifacts cascade
   via real FKs) → `project.delete` (ProjectFile rows cascade) → best-effort `unlink`
-  the on-disk uploads. **Deleting a project deletes its chats** (matches ChatGPT/Claude).
+  the on-disk uploads. **Deleting a project deletes its chats**.
 - `POST /api/projects/[id]/files` (multipart `files`) → **200** `UploadProjectFilesResponse`.
   Reuses `@/lib/storage` (`validateFile`/`saveFiles`), enforces `MAX_PROJECT_FILES`,
   extracts text per file. `GET` lists them. `DELETE …/files/[fileId]` removes one
@@ -866,7 +866,7 @@ vector (`/uploads` is public). Applies to all upload paths (attachments + projec
 
 ## 12. Deep Research (authoritative)
 
-ChatGPT-style **Deep Research**: a composer toggle runs a two-phase research flow that streams a
+**Deep Research**: a composer toggle runs a two-phase research flow that streams a
 **cited report inline** as the assistant message's content, beneath a live **Research** activity panel.
 It reuses the existing SSE stream, the `web_search`/`web_fetch` tools (SSRF-guarded), and the reasoning
 plumbing (§9). Depth is fixed **"Standard"**: ~4 subtopics × ~3 sources ≈ ~12 page reads. No depth picker.

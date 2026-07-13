@@ -58,7 +58,7 @@ export function ProjectIcon({
   return <Icon size={size} className={className} aria-hidden="true" />;
 }
 
-/** ChatGPT-style short relative time: "Just now" · "12m" · "5h" · "Yesterday" · "Mon" · "Mar 12". */
+/** Short relative time: "Just now" · "12m" · "5h" · "Yesterday" · "Mon" · "Mar 12". */
 export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";

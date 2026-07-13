@@ -1,4 +1,4 @@
-// Prisma schema for the ChatGPT clone.
+// Prisma schema for OpenAgent.
 // Provider: SQLite. DATABASE_URL="file:./dev.db"
 
 generator client {
@@ -16,7 +16,7 @@ model User {
   email          String  @unique
   hashedPassword String?
   image          String?
-  // JSON-encoded global custom instructions (ChatGPT "Customize ChatGPT"):
+  // JSON-encoded global custom instructions ("Customize OpenAgent"):
   // { nickname, occupation, traits, about, enabled }. Injected into the system
   // prompt for every chat when enabled — see src/lib/user/prompt.ts.
   customInstructions String?
@@ -87,13 +87,13 @@ model Conversation {
   // Set when this conversation was created by a scheduled-task run. Nulled (not
   // cascaded) if the owning Schedule is deleted, so past run chats survive.
   scheduleId String?
-  // Set when this conversation belongs to a Project (ChatGPT/Claude-style). The
+  // Set when this conversation belongs to a Project. The
   // project's custom instructions + knowledge files are injected into the system
   // prompt for every turn in this chat. Deleting a project deletes its chats,
   // handled in application code (see DELETE /api/projects/[id]); "Remove from
   // project" nulls this column instead.
   projectId String?
-  // The leaf message of the currently-visible branch (ChatGPT-style edit /
+  // The leaf message of the currently-visible branch (edit /
   // regenerate produce a message TREE, not a linear list — see Message.parentId).
   // The visible path is the chain of parents from this leaf up to a root message.
   // Null for empty conversations; backfilled to the last message for legacy chats.
@@ -193,7 +193,7 @@ model ArtifactVersion {
   @@index([artifactId])
 }
 
-// A ChatGPT-Sites-style Site: a first-class, USER-owned, publishable web
+// A Sites-style Site: a first-class, USER-owned, publishable web
 // page/app built from a prompt (or seeded from an Artifact) and served at a
 // public URL (/s/<slug>). A Site is deliberately independent of the chat that
 // created it — it survives conversation/artifact deletion (owned by the User,
@@ -227,7 +227,7 @@ model Site {
   sourceArtifactId        String?  // plain column, app-nulled if the artifact is gone
   createdInConversationId String?  // provenance only, NOT a relation
   // JSON hosting.json stub { project_id: <site.id>, d1: null, r2: null } — a nod
-  // to ChatGPT Sites' manifest; storage backends are out of scope for this clone.
+  // to the Sites manifest; storage backends are out of scope for this clone.
   manifest                String?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
@@ -241,7 +241,7 @@ model Site {
 
 // One immutable build snapshot of a Site's draft, created by "Save a Version".
 // `version` is 1-based and increments per save. `commit` = sha256(content) prefix
-// — a stand-in for ChatGPT Sites' "version associated with a git commit".
+// — a stand-in for the Sites "version associated with a git commit".
 // Deploying points Site.liveVersionId at one of these.
 model SiteVersion {
   id              String   @id @default(cuid())
@@ -263,7 +263,7 @@ model SiteVersion {
 }
 
 // A remote MCP (Model Context Protocol) server registered by a user, exposed in
-// the UI as a "Connector" (ChatGPT-style). Its tools are surfaced to the chat
+// the UI as a "Connector". Its tools are surfaced to the chat
 // agent when the connector is enabled + trusted + connected. All OAuth secrets
 // and tokens live ONLY in these columns and are never serialized to the client
 // (the API returns a sanitized McpConnector DTO — see src/lib/types.ts).
@@ -391,7 +391,7 @@ model ScheduleRun {
   @@index([scheduleId])
 }
 
-// A ChatGPT/Claude-style Project: a workspace that groups conversations around a
+// A Project: a workspace that groups conversations around a
 // shared purpose. Its `instructions` (custom instructions) and attached
 // knowledge `files` are composed into the system prompt for every chat in the
 // project (see src/lib/projects/prompt.ts). Deleting a project cascades to its

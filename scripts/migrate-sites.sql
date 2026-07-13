@@ -1,4 +1,4 @@
--- ChatGPT Sites feature — additive migration (SQLite / dev.db).
+-- Sites feature — additive migration (SQLite / dev.db).
 -- This repo has no prisma/migrations dir; schema changes are applied with
 -- hand-written additive SQL (same approach used for Project/Plugin), then
 -- `prisma generate` regenerates the client. NEVER run

@@ -13,7 +13,7 @@ export interface ProjectInstructionsModalProps {
 }
 
 /**
- * "Instructions" pop-up for a project (ChatGPT-style). A single large textarea;
+ * "Instructions" pop-up for a project. A single large textarea;
  * the value is injected into the system prompt of every chat in the project.
  */
 export function ProjectInstructionsModal({

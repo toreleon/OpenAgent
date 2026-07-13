@@ -23,7 +23,7 @@ export interface ScheduleRowProps {
   onEdit: (schedule: ScheduleSummary) => void;
 }
 
-/** One task in the Scheduled-tasks list (ChatGPT-style). */
+/** One task in the Scheduled-tasks list. */
 export function ScheduleRow({ schedule, onEdit }: ScheduleRowProps) {
   const update = useScheduleStore((s) => s.update);
   const remove = useScheduleStore((s) => s.remove);

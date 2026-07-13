@@ -151,8 +151,8 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 }
 
 /**
- * DELETE /api/projects/[id] — deleting a project deletes its chats (matches
- * ChatGPT/Claude). SQLite enforces no FK on Conversation.projectId, so we
+ * DELETE /api/projects/[id] — deleting a project deletes its chats. SQLite
+ * enforces no FK on Conversation.projectId, so we
  * cascade the conversations manually FIRST (their messages/artifacts cascade via
  * real FKs), then delete the project (ProjectFile rows cascade via real FK).
  */

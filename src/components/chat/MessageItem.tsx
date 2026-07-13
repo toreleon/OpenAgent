@@ -98,7 +98,7 @@ function AttachmentChips({ attachments }: { attachments: Attachment[] }) {
   );
 }
 
-/** ChatGPT-style `‹ 2/3 ›` pager for stepping between sibling branch versions. */
+/** A `‹ 2/3 ›` pager for stepping between sibling branch versions. */
 function VersionNav({
   index,
   count,
@@ -170,7 +170,7 @@ export function MessageItem({
   controlsDisabled,
 }: MessageItemFullProps) {
   const { copied, copy } = useCopyToClipboard();
-  // Cosmetic thumbs toggle (matches ChatGPT's action bar; no server persistence).
+  // Cosmetic thumbs toggle (action bar; no server persistence).
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [editing, setEditing] = useState(false);
   const isUser = message.role === "user";
@@ -359,7 +359,7 @@ export function MessageItem({
 }
 
 /**
- * Inline editor shown in place of a user bubble. Mirrors ChatGPT: the bubble
+ * Inline editor shown in place of a user bubble: the bubble
  * becomes an auto-growing textarea with Cancel / Send; Enter saves, Escape
  * cancels. Attachments are preserved (shown read-only) and carried by the store.
  */

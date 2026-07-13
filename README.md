@@ -1,10 +1,10 @@
-# Agent App Template
+# OpenAgent
 
 A clean, batteries-included starting point for building **production agent apps** with the
 [OpenAI Agents SDK](https://github.com/openai/openai-agents-js) and **Next.js 14** (App Router).
 
-It looks and behaves like a ChatGPT clone — auth, a streaming chat UI, a "Thinking" panel,
-file/image uploads, and ChatGPT-style **Connectors** — but it is really a *template*: a small,
+It looks and behaves like a modern assistant app — auth, a streaming chat UI, a "Thinking" panel,
+file/image uploads, and **Connectors** — but it is really a *template*: a small,
 readable, well-typed codebase you can fork and extend into your own agent product. Out of the box
 you get authentication, persistent conversations, server-streamed chat over the OpenAI **Responses
 API**, built-in tools, and full **OAuth 2.1** for remote MCP servers — all wired together with a
@@ -22,8 +22,8 @@ It runs against the public OpenAI API **or** any OpenAI-compatible endpoint (e.g
 - **Reasoning / "Thinking" UI** — streams the model's reasoning summary into a collapsible panel and persists it across reloads.
 - **Built-in tools** — hosted web search (with a dependency-free DuckDuckGo fallback), `run_javascript`, and `get_current_time`.
 - **File & image uploads** — drag-and-drop attachments surfaced to vision-capable models as `input_image` / `input_file`.
-- **Deep Research** — a composer toggle that runs a ChatGPT-style research flow: the agent asks clarifying questions, then plans ~4 subtopics, runs ~12 `web_search`/`web_fetch` reads, and streams a **cited report inline** in the chat message beneath a live "Research" activity panel.
-- **MCP Connectors** — register remote Streamable-HTTP MCP servers (ChatGPT-style) with **full OAuth 2.1**: metadata discovery, dynamic client registration, PKCE, callback, and automatic token refresh. Server secrets/tokens never leave the server.
+- **Deep Research** — a composer toggle that runs a research flow: the agent asks clarifying questions, then plans ~4 subtopics, runs ~12 `web_search`/`web_fetch` reads, and streams a **cited report inline** in the chat message beneath a live "Research" activity panel.
+- **MCP Connectors** — register remote Streamable-HTTP MCP servers with **full OAuth 2.1**: metadata discovery, dynamic client registration, PKCE, callback, and automatic token refresh. Server secrets/tokens never leave the server.
 - **OpenAI / Azure-compatible** — point at OpenAI or any compatible endpoint with `OPENAI_BASE_URL` + `OPENAI_MODEL`.
 - **Tailwind dark theme**, Markdown + KaTeX + syntax highlighting, Zustand stores, SQLite via Prisma.
 
@@ -247,14 +247,14 @@ See the **Web tools** block in `.env.example` for every knob, including `web_fet
 
 ## Deep Research
 
-A composer **Deep Research** toggle turns a normal chat turn into a ChatGPT-style research run: the
+A composer **Deep Research** toggle turns a normal chat turn into a research run: the
 agent scopes the request, gathers sources from the live web, and streams a **cited report inline in the
 chat message** (not a side panel) beneath a collapsible **Research** activity panel that shows the plan
 and each live search/source as it happens.
 
 ### Clarify → answer → report
 
-Deep Research is **two-phase**, mirroring ChatGPT:
+Deep Research is **two-phase**:
 
 1. **Clarify.** On the first Deep-Research turn the agent replies with **2–3 concise clarifying
    questions** (a short numbered list, streamed as a normal assistant message) to pin down scope,

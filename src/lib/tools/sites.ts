@@ -5,7 +5,7 @@ import prisma from "@/lib/db";
 import { userIdFromContext } from "@/lib/sandbox/confine";
 
 /**
- * The Site tools (ChatGPT-Sites-style publishing). Like the artifact tools these
+ * The Site tools (Sites-style publishing). Like the artifact tools these
  * are mostly "capture" tools: create_site / update_site carry the page payload
  * out of the model, and the /api/chat route intercepts them to persist the draft,
  * version it, and stream a `site` event to the panel (see src/lib/sites.ts).

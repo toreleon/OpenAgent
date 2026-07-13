@@ -38,7 +38,7 @@ const EXAMPLES: { label: string; template: ScheduleTemplate }[] = [
   },
 ];
 
-/** Top-level client app for /schedules — a ChatGPT-"Tasks"-style list. */
+/** Top-level client app for /schedules — a Tasks-style list. */
 export function SchedulesApp() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [formOpen, setFormOpen] = useState(false);

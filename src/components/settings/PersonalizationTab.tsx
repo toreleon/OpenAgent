@@ -14,7 +14,7 @@ import {
   RowButton,
 } from "./primitives";
 
-/** Trait chips that append to the "traits" field (ChatGPT's quick-picks). */
+/** Trait chips that append to the "traits" field (quick-picks). */
 const TRAIT_SUGGESTIONS = [
   "Chatty",
   "Witty",
@@ -87,7 +87,7 @@ export function PersonalizationTab() {
       <SectionHeader>Custom instructions</SectionHeader>
 
       <div className="flex flex-col gap-4 pt-1">
-        <Field label="What should ChatGPT call you?">
+        <Field label="What should OpenAgent call you?">
           <input
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
@@ -105,7 +105,7 @@ export function PersonalizationTab() {
           />
         </Field>
 
-        <Field label="What traits should ChatGPT have?">
+        <Field label="What traits should OpenAgent have?">
           <textarea
             value={traits}
             onChange={(e) => setTraits(e.target.value)}
@@ -127,7 +127,7 @@ export function PersonalizationTab() {
           </div>
         </Field>
 
-        <Field label="Anything else ChatGPT should know?">
+        <Field label="Anything else OpenAgent should know?">
           <textarea
             value={about}
             onChange={(e) => setAbout(e.target.value)}
@@ -159,7 +159,7 @@ export function PersonalizationTab() {
 
       <SettingRow
         label="Reference saved memories"
-        description="Let ChatGPT save and use memories."
+        description="Let OpenAgent save and use memories."
         control={
           <Toggle
             checked={prefs.memorySaved}
@@ -170,7 +170,7 @@ export function PersonalizationTab() {
       />
       <SettingRow
         label="Reference chat history"
-        description="Let ChatGPT reference recent conversations."
+        description="Let OpenAgent reference recent conversations."
         control={
           <Toggle
             checked={prefs.memoryHistory}
@@ -184,7 +184,7 @@ export function PersonalizationTab() {
         description={
           showedMemories
             ? "No memories yet."
-            : "View and clear the memories ChatGPT has saved."
+            : "View and clear the memories OpenAgent has saved."
         }
         control={
           <RowButton onClick={() => setShowedMemories(true)}>Manage</RowButton>

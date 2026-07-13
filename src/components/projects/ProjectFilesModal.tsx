@@ -29,7 +29,7 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * "Project files" pop-up (ChatGPT-style). Drag-and-drop or browse to add
+ * "Project files" pop-up. Drag-and-drop or browse to add
  * knowledge files shared with every chat in the project; text is extracted and
  * injected as context. Files without extractable text are flagged "Not indexed".
  */

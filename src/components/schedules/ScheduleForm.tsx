@@ -346,7 +346,7 @@ export function ScheduleForm({ open, schedule, template, onClose }: ScheduleForm
                 </Field>
               )}
 
-              {/* Timezone echo (ChatGPT shows the resolved zone read-only). */}
+              {/* Timezone echo (show the resolved zone read-only). */}
               <div className="text-xs text-text-secondary">
                 Runs in <span className="text-text-primary">{timezone}</span>
                 {" · "}

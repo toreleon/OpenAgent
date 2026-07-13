@@ -1,5 +1,5 @@
 /**
- * Friendly, ChatGPT-style presentation of tool activity.
+ * Friendly presentation of tool activity.
  *
  * A tool call is NEVER shown to the user as its raw internal name or JSON args.
  * Instead we render a compact activity row: an icon + a human verb + at most one

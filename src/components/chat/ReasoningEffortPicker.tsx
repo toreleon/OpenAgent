@@ -15,7 +15,7 @@ export interface ReasoningEffortPickerProps {
 }
 
 /**
- * ChatGPT-style reasoning-effort selector. Bound directly to the chat store
+ * Reasoning-effort selector. Bound directly to the chat store
  * (`effort` / `setEffort`) so it can sit anywhere in the composer without prop
  * threading. Mirrors ModelPicker's look and feel.
  */

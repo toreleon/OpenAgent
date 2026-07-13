@@ -341,7 +341,7 @@ export async function POST(req: Request) {
   }
 
   // System-prompt context: the user's global custom instructions ("Customize
-  // ChatGPT") plus, for project-scoped chats, the project's instructions +
+  // OpenAgent") plus, for project-scoped chats, the project's instructions +
   // knowledge. Both degrade to nothing on error; combined into one block passed
   // as `projectContext` so no agent-signature change is needed.
   const userContext = await loadUserContext(prisma, userId);

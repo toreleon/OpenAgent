@@ -1,6 +1,6 @@
 /**
  * Client-safe helpers that translate between the cron-backed Schedule model and
- * ChatGPT-"Tasks"-style natural language: a Frequency picker (Daily / Weekly /
+ * A Tasks-style natural language: a Frequency picker (Daily / Weekly /
  * Monthly / Custom) that builds cron, a reverse detector for editing, a
  * cron -> "Every weekday at 8:00 AM" renderer, and a relative next-run label.
  *
@@ -146,7 +146,7 @@ export function detectFrequency(cron: string): {
 }
 
 /**
- * Render a cron as ChatGPT-style natural language ("Every weekday at 8:00 AM"),
+ * Render a cron as natural language ("Every weekday at 8:00 AM"),
  * or null when it isn't one of the recognized shapes (caller falls back to the
  * server's cronstrue description).
  */

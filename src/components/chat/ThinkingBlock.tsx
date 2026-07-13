@@ -63,7 +63,7 @@ function synthesizeTimeline(
 }
 
 /**
- * ChatGPT-style collapsible "Thinking" trace rendered above an assistant answer.
+ * A collapsible "Thinking" trace rendered above an assistant answer.
  * Reasoning segments and tool-activity rows are shown as ONE chronological
  * timeline (never all-reasoning-then-all-tools).
  *

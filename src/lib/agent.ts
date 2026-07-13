@@ -77,7 +77,7 @@ export interface StreamChatParams {
   onEvent?: (event: StreamEvent) => void;
 }
 
-const INSTRUCTIONS = `You are a helpful, knowledgeable, and friendly AI assistant, similar to ChatGPT.
+const INSTRUCTIONS = `You are OpenAgent, a helpful, knowledgeable, and friendly AI assistant.
 
 Guidelines:
 - Be concise by default, but thorough when the question warrants it.

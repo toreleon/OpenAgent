@@ -29,7 +29,7 @@ export function SettingsPanel({
   );
 }
 
-/** A label-left / control-right row with a hairline divider (ChatGPT-style). */
+/** A label-left / control-right row with a hairline divider. */
 export function SettingRow({
   label,
   description,
@@ -103,7 +103,7 @@ export function Toggle({
   );
 }
 
-/** A compact bordered dropdown (native select styled as a ChatGPT pill). */
+/** A compact bordered dropdown (native select styled as a pill). */
 export function SelectControl({
   value,
   onChange,
@@ -167,7 +167,7 @@ export function RowButton({
 /**
  * Confirmation dialog for destructive actions. When `requireText` is set the
  * confirm button stays disabled until the user types that exact string
- * (ChatGPT's type-to-confirm for account deletion).
+ * (type-to-confirm for account deletion).
  */
 export function ConfirmDialog({
   open,

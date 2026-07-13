@@ -99,7 +99,7 @@ function ActivityRow({ activity }: { activity: ResearchActivityEntry }) {
 }
 
 /**
- * ChatGPT-style collapsible "Research" activity block rendered above a deep
+ * A collapsible "Research" activity block rendered above a deep
  * research report.
  *
  * - While streaming (and not yet in the report phase): auto-expanded,

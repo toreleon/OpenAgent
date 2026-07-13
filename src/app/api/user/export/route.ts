@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 /**
  * GET /api/user/export — a JSON archive of the user's account + conversations
  * (with messages). Returned as a file download (Content-Disposition attachment),
- * mirroring ChatGPT's "Export data" (minus the email-a-link flow).
+ * mirroring a standard "Export data" flow (minus the email-a-link flow).
  */
 export async function GET() {
   const session = await getServerSession(authOptions);

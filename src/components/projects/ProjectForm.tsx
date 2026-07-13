@@ -19,7 +19,7 @@ export interface ProjectFormProps {
 }
 
 /**
- * ChatGPT-style project naming dialog. Creation is name-only — instructions and
+ * Project naming dialog. Creation is name-only — instructions and
  * files are added on the project page. Editing reuses it as "Rename project".
  */
 export function ProjectForm({ open, project, onClose, onCreated }: ProjectFormProps) {

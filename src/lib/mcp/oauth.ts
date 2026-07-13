@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 /**
  * OAuth 2.1 helpers for MCP connectors. Implements the discovery + dynamic
- * registration + PKCE authorization-code flow used by ChatGPT-style remote MCP
+ * registration + PKCE authorization-code flow used by remote MCP
  * servers (RFC 9728 protected-resource metadata, RFC 8414 AS metadata,
  * RFC 7591 dynamic client registration, RFC 7636 PKCE, RFC 8707 resource
  * indicators). Every network call uses fetch with a 10s timeout.
@@ -151,7 +151,7 @@ export async function registerClient(
       Accept: "application/json",
     },
     body: JSON.stringify({
-      client_name: "ChatGPT Clone Connector",
+      client_name: "OpenAgent Connector",
       redirect_uris: [redirectUri],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

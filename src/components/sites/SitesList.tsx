@@ -62,7 +62,7 @@ function SiteCard({ site }: { site: SiteSummary }) {
   );
 }
 
-/** Full-page dashboard of the user's Sites (ChatGPT-Sites-style "Sites list"). */
+/** Full-page dashboard of the user's Sites (Sites-style "Sites list"). */
 export function SitesList() {
   const [sites, setSites] = useState<SiteSummary[]>([]);
   const [loading, setLoading] = useState(true);

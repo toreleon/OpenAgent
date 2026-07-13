@@ -49,7 +49,7 @@ const TABS: { id: SettingsTab; label: string; icon: LucideIcon }[] = [
 export interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
-  /** Which tab to open on (e.g. "personalization" for "Customize ChatGPT"). */
+  /** Which tab to open on (e.g. "personalization" for "Customize OpenAgent"). */
   initialTab?: SettingsTab;
 }
 

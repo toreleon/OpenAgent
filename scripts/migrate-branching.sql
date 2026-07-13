@@ -1,4 +1,4 @@
--- Message-branching feature (ChatGPT-style edit / regenerate with version
+-- Message-branching feature (edit / regenerate with version
 -- history) — additive migration (SQLite / dev.db).
 --
 -- This repo has no prisma/migrations dir; schema changes are applied with
