@@ -68,7 +68,7 @@ export function ArtifactChip({ artifactRef }: ArtifactChipProps) {
 
   if (showInlineArtifact && artifact && version) {
     return (
-      <div className="w-full max-w-xl">
+      <div className="w-full max-w-xl animate-fade-in-up">
         <div className="mb-1.5 flex items-center gap-2 text-xs">
           <button
             type="button"
@@ -129,7 +129,7 @@ export function ArtifactChip({ artifactRef }: ArtifactChipProps) {
     <button
       type="button"
       onClick={() => openArtifact(artifactRef.artifactId, artifactRef.version)}
-      className="flex w-full max-w-sm cursor-pointer items-center gap-3 rounded-xl border border-border bg-sidebar/60 px-3 py-2 text-left transition-colors hover:bg-hover"
+      className="flex w-full max-w-sm cursor-pointer items-center gap-3 rounded-xl border border-border bg-sidebar/60 px-3 py-2 text-left transition-colors hover:bg-hover animate-scale-in origin-top motion-press"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/20 text-accent">
         <Icon size={18} />

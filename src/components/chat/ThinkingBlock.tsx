@@ -167,7 +167,7 @@ export function ThinkingBlock({
           open ? "mt-1.5 grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         )}
       >
-        <div className="min-h-0 overflow-hidden">
+        <div className="min-h-0 overflow-hidden animate-fade-in-down">
           <div
             ref={scrollRef}
             className={cn(

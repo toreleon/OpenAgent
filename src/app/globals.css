@@ -106,6 +106,150 @@ body {
   }
 }
 
+/* =========================================================================
+ * Motion system
+ * A small, dependency-free vocabulary of entrance + interaction animations
+ * shared across the app. Everything is opacity/transform based (compositor-
+ * friendly) and every entrance lands on a fully-visible final state, so the
+ * reduced-motion reset at the bottom can safely near-zero durations without
+ * ever leaving an element stuck invisible.
+ *
+ * Conventions used throughout the components:
+ *   .animate-fade-in-up / -down   one-shot entrance (messages, cards, popovers)
+ *   .animate-scale-in             modal / menu content pop
+ *   .animate-slide-in-right/-left side panels (Artifacts, Workspace, Sites)
+ *   .stagger-children             sequenced list/grid reveal on batch mount
+ *   .motion-press                 tactile scale-down on :active for buttons
+ * (existing .animate-fade-in / -shimmer / -pulse-cursor come from tailwind.config.)
+ * ========================================================================= */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-in-down {
+  animation: fade-in-down 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-scale-in {
+  animation: scale-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-slide-in-left {
+  animation: slide-in-left 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Sequenced entrance for batch-mounted list/grid children (conversation rows,
+ * project / site / schedule cards). Put it on the container; direct children
+ * fade-and-rise in a quick cascade. */
+.stagger-children > * {
+  animation: fade-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stagger-children > *:nth-child(1) {
+  animation-delay: 20ms;
+}
+.stagger-children > *:nth-child(2) {
+  animation-delay: 55ms;
+}
+.stagger-children > *:nth-child(3) {
+  animation-delay: 90ms;
+}
+.stagger-children > *:nth-child(4) {
+  animation-delay: 125ms;
+}
+.stagger-children > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.stagger-children > *:nth-child(6) {
+  animation-delay: 195ms;
+}
+.stagger-children > *:nth-child(7) {
+  animation-delay: 230ms;
+}
+.stagger-children > *:nth-child(8) {
+  animation-delay: 265ms;
+}
+.stagger-children > *:nth-child(n + 9) {
+  animation-delay: 300ms;
+}
+
+/* Tactile press feedback. Pairs with the hover:/transition utilities already in
+ * use on buttons; add alongside them for a subtle scale-down on press. */
+.motion-press {
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.motion-press:active {
+  transform: scale(0.97);
+}
+
+/* Reduced-motion safety net: honor the OS "reduce motion" setting by collapsing
+ * every animation/transition to ~instant. Because entrances fill `both`, they
+ * still resolve to their visible end state — nothing is left hidden. The
+ * .animate-shimmer block above keeps its dedicated text-fill handling via higher
+ * specificity. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Base typography for rendered markdown */
 .prose-chat {
   line-height: 1.75;

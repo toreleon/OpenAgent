@@ -40,11 +40,11 @@ export interface EmptyStateProps {
 export function EmptyState({ onPick }: EmptyStateProps) {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center px-4">
-      <div className="w-full max-w-chat">
+      <div className="w-full max-w-chat animate-fade-in-up">
         <h1 className="mb-8 text-center text-3xl font-semibold text-text-primary">
           What can I help with?
         </h1>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="stagger-children grid grid-cols-1 gap-3 sm:grid-cols-2">
           {SUGGESTIONS.map((s) => {
             const Icon = s.icon;
             return (
@@ -52,7 +52,7 @@ export function EmptyState({ onPick }: EmptyStateProps) {
                 key={s.title}
                 type="button"
                 onClick={() => onPick(s.prompt)}
-                className="group flex items-start gap-3 rounded-2xl border border-border bg-transparent p-4 text-left transition-colors hover:bg-hover"
+                className="motion-press group flex items-start gap-3 rounded-2xl border border-border bg-transparent p-4 text-left transition-colors hover:bg-hover"
               >
                 <Icon
                   size={18}

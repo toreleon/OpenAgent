@@ -120,7 +120,7 @@ export function SiteBackendPanel({ siteId }: { siteId: string }) {
   const usedPct = config.dataQuotaBytes > 0 ? Math.min(100, (config.usage.bytes / config.dataQuotaBytes) * 100) : 0;
 
   return (
-    <section className="mt-8 border-t border-border pt-6">
+    <section className="animate-fade-in-up mt-8 border-t border-border pt-6">
       <div className="flex items-center gap-3">
         <h2 className="text-sm font-semibold text-text-primary">Backend</h2>
         <span className="text-xs text-text-secondary">Turn a static site into a mini-app with server data, logins, and APIs.</span>

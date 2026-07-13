@@ -125,7 +125,7 @@ export function ProjectDetail({ projectId }: ProjectDetailProps) {
               </button>
             </div>
           ) : (
-            <div className="mx-auto w-full max-w-3xl px-4 pb-20 pt-12 sm:pt-16">
+            <div className="animate-fade-in-up mx-auto w-full max-w-3xl px-4 pb-20 pt-12 sm:pt-16">
               {/* Header */}
               <div className="flex items-center gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-secondary">

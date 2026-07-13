@@ -90,7 +90,7 @@ export function ScheduleRunList({ scheduleId }: ScheduleRunListProps) {
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
         Recent runs
       </p>
-      <ul className="flex flex-col gap-1">
+      <ul className="stagger-children flex flex-col gap-1">
         {runs.map((run) => (
           <li
             key={run.id}

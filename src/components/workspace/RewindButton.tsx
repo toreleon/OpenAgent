@@ -18,7 +18,7 @@ export function RewindButton({ messageId }: { messageId: string }) {
       onClick={() => openRewind(messageId)}
       disabled={isStreaming}
       title="Rewind code state to this turn"
-      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+      className="motion-press inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
     >
       <History size={14} className="shrink-0" />
       Rewind
