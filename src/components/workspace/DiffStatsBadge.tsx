@@ -59,7 +59,7 @@ export function DiffStatsBadge({ messageId }: { messageId: string }) {
     <button
       type="button"
       onClick={() => openWorkspace({ scope: "lastTurn", messageId })}
-      className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs transition-colors ${
+      className={`animate-scale-in motion-press inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs transition-colors ${
         active
           ? "border-accent/50 bg-accent/10 text-text-primary"
           : "border-border text-text-secondary hover:bg-hover hover:text-text-primary"

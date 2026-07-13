@@ -44,7 +44,7 @@ export function ScheduleRow({ schedule, onEdit }: ScheduleRowProps) {
   return (
     <div
       className={cn(
-        "group flex items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-hover",
+        "group flex animate-fade-in-up items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-hover",
         !enabled && "opacity-55",
       )}
     >
@@ -87,7 +87,7 @@ export function ScheduleRow({ schedule, onEdit }: ScheduleRowProps) {
           type="button"
           onClick={() => onEdit(schedule)}
           aria-label={`Edit ${schedule.title}`}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-border/50 hover:text-text-primary"
+          className="motion-press flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-border/50 hover:text-text-primary"
         >
           <Pencil size={15} />
         </button>

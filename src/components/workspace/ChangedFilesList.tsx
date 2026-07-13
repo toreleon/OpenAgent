@@ -25,7 +25,7 @@ export function ChangedFilesList({
     );
   }
   return (
-    <ul className="py-1">
+    <ul className="py-1 stagger-children">
       {changes.map((c) => (
         <li key={c.path}>
           <button

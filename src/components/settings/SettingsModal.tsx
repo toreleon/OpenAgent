@@ -93,7 +93,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
         </nav>
 
         {/* Content pane */}
-        <div className="min-w-0 flex-1 overflow-hidden p-5">
+        <div key={tab} className="min-w-0 flex-1 overflow-hidden p-5 animate-fade-in">
           {tab === "general" && <GeneralTab />}
           {tab === "notifications" && <NotificationsTab />}
           {tab === "personalization" && <PersonalizationTab />}

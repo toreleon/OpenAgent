@@ -242,7 +242,7 @@ export function BrowserActivity({ browser, isStreaming }: BrowserActivityProps) 
                   {trace.map((step, i) => (
                     <li
                       key={i}
-                      className="flex items-center gap-1.5 py-0.5 text-[12px] leading-relaxed text-text-secondary"
+                      className="flex animate-fade-in-up items-center gap-1.5 py-0.5 text-[12px] leading-relaxed text-text-secondary"
                     >
                       <TraceIcon icon={step.icon} />
                       <span className="min-w-0 flex-1 truncate" title={step.label}>

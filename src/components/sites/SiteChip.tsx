@@ -24,14 +24,14 @@ export function SiteChip({ siteRef }: SiteChipProps) {
   const verb = siteRef.command === "deploy" ? "Published site" : COMMAND_VERB[siteRef.command];
 
   return (
-    <div className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-border bg-sidebar/60 px-3 py-2">
+    <div className="animate-scale-in origin-left flex w-full max-w-sm items-center gap-3 rounded-xl border border-border bg-sidebar/60 px-3 py-2">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/20 text-accent">
         {siteRef.deployed ? <Rocket size={18} /> : <Globe size={18} />}
       </span>
       <button
         type="button"
         onClick={() => router.push(`/sites/${siteRef.siteId}`)}
-        className="flex min-w-0 flex-1 flex-col text-left"
+        className="motion-press flex min-w-0 flex-1 flex-col text-left"
       >
         <span className="truncate text-sm font-medium text-text-primary">{siteRef.name}</span>
         <span className="truncate text-[11px] text-text-secondary">

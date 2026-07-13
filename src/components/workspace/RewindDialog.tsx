@@ -91,8 +91,8 @@ export function RewindDialog() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-main text-text-primary shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in">
+      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-main text-text-primary shadow-2xl animate-scale-in origin-center">
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <History size={16} className="text-text-secondary" />

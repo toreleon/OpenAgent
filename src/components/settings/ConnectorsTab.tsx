@@ -78,7 +78,7 @@ export function ConnectorsTab() {
             No connectors yet. Add one to get started.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2 stagger-children">
             {connectors.map((c) => (
               <ConnectorRow key={c.id} connector={c} />
             ))}

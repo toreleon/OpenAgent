@@ -49,7 +49,7 @@ export default function LoginForm({ githubEnabled }: LoginFormProps) {
   const busy = submitting || githubLoading;
 
   return (
-    <div className="rounded-2xl border border-border bg-sidebar p-8 shadow-xl">
+    <div className="animate-scale-in origin-center rounded-2xl border border-border bg-sidebar p-8 shadow-xl">
       <div className="mb-6 text-center">
         <h1 className="text-2xl font-semibold text-text-primary">
           Welcome back
@@ -62,7 +62,7 @@ export default function LoginForm({ githubEnabled }: LoginFormProps) {
       {error && (
         <div
           role="alert"
-          className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400"
+          className="animate-fade-in-down mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400"
         >
           {error}
         </div>
@@ -112,7 +112,7 @@ export default function LoginForm({ githubEnabled }: LoginFormProps) {
         <button
           type="submit"
           disabled={busy}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+          className="motion-press flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
           {submitting ? "Signing in…" : "Sign in"}
@@ -133,7 +133,7 @@ export default function LoginForm({ githubEnabled }: LoginFormProps) {
             type="button"
             onClick={handleGithub}
             disabled={busy}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-main px-4 py-2 font-medium text-text-primary transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-60"
+            className="motion-press flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-main px-4 py-2 font-medium text-text-primary transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {githubLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />

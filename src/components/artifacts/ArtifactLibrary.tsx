@@ -120,7 +120,7 @@ export function ArtifactLibrary() {
             </p>
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-children">
             {visibleArtifacts.map((artifact) => {
               const latest = artifact.versions.at(-1);
               const latestVersion = latest?.version ?? 1;

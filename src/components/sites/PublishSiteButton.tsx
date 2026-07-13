@@ -62,7 +62,7 @@ export function PublishSiteButton({ artifactId, title, className }: PublishSiteB
         onClick={() => setOpen(true)}
         className={
           className ??
-          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+          "motion-press inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
         }
         title="Publish this artifact as a shareable Site"
       >

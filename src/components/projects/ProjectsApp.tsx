@@ -101,7 +101,7 @@ export function ProjectsApp() {
             ) : isEmpty ? (
               <EmptyState onCreate={openCreate} />
             ) : (
-              <ul className="flex flex-col">
+              <ul className="stagger-children flex flex-col">
                 {projects.map((p) => (
                   <li
                     key={p.id}
@@ -110,7 +110,7 @@ export function ProjectsApp() {
                     <button
                       type="button"
                       onClick={() => router.push(`/projects/${p.id}`)}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      className="motion-press flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
                       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-secondary">
                         <ProjectIcon icon={p.icon} size={20} />

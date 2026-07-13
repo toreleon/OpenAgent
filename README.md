@@ -20,12 +20,22 @@ It runs against the public OpenAI API **or** any OpenAI-compatible endpoint (e.g
 - **Auth** — NextAuth (Credentials + optional GitHub), JWT sessions, Prisma adapter, bcrypt password hashing.
 - **Streaming chat** — server-sent events over the OpenAI Responses API via `@openai/agents`; token-by-token deltas.
 - **Reasoning / "Thinking" UI** — streams the model's reasoning summary into a collapsible panel and persists it across reloads.
+- **Message branching** — edit a prior user message or regenerate a reply to create sibling versions, navigable with a `‹ n/m ›` control; the conversation is stored as a tree and the active branch survives reloads.
 - **Built-in tools** — hosted web search (with a dependency-free DuckDuckGo fallback), `run_javascript`, and `get_current_time`.
 - **File & image uploads** — drag-and-drop attachments surfaced to vision-capable models as `input_image` / `input_file`.
-- **Deep Research** — a composer toggle that runs a research flow: the agent asks clarifying questions, then plans ~4 subtopics, runs ~12 `web_search`/`web_fetch` reads, and streams a **cited report inline** in the chat message beneath a live "Research" activity panel.
+- **Artifacts** — model-invoked create/update/rewrite tools produce **versioned** side-panel artifacts (html, react, markdown, svg, mermaid, code, image) with a version history and a browsable library.
+- **Projects** — group conversations into a workspace with **custom instructions** and **knowledge files** injected into the system prompt for every chat inside it.
+- **Sites** — publish a page as a first-class **Site** served at `/s/<slug>` (draft → Save Version → Deploy lifecycle) with an optional **custom backend tier** (sandboxed server functions, KV/blob/secrets, `/api/*` endpoints).
+- **Coding Workspace** — a confined per-conversation coding sandbox whose file edits surface as a `+N/−M` diff badge opening a split-pane workspace panel: file tree, red/green diff, inline comments, and a **rewind/restore** dialog.
+- **Parallel Subagents** — a `run_subagents` tool fans a task out to concurrent read-only worker agents, streaming live per-agent traces and timers into a rich Subagents panel.
+- **Browser control** — built-in per-conversation headless Chromium with accessibility-tree grounding and `browser_*` tools (gated OFF behind `BROWSER_CONTROL_ENABLED=1`).
+- **Plugins & Skills** — install plugins from a git URL or local folder; bundled Agent-Skills are exposed via a progressive-disclosure `skill` tool, and a `/` composer menu lets you hard-invoke skills directly.
+- **Deep Research** — a composer toggle that runs a clarify → plan → multi-search research flow and delivers a **cited report as a markdown side-panel artifact** beneath a live "Research" activity panel.
+- **Scheduled tasks** — recurring or one-off agent runs (cron/interval) that each spawn a fresh conversation, with a run log; driven by an in-process ticker or an external cron endpoint.
 - **MCP Connectors** — register remote Streamable-HTTP MCP servers with **full OAuth 2.1**: metadata discovery, dynamic client registration, PKCE, callback, and automatic token refresh. Server secrets/tokens never leave the server.
+- **Settings & personalization** — an 8-tab settings modal with real **light/dark theme**, accent color, global custom instructions, and data controls (export, delete chats, sessions); a unified **Model · Effort** composer picker.
 - **OpenAI / Azure-compatible** — point at OpenAI or any compatible endpoint with `OPENAI_BASE_URL` + `OPENAI_MODEL`.
-- **Tailwind dark theme**, Markdown + KaTeX + syntax highlighting, Zustand stores, SQLite via Prisma.
+- **Motion & UI** — a dependency-free CSS animation system (entrance, stagger, tactile press) that honors `prefers-reduced-motion`; Markdown + KaTeX + syntax highlighting, Zustand stores, SQLite via Prisma.
 
 ---
 
@@ -248,9 +258,9 @@ See the **Web tools** block in `.env.example` for every knob, including `web_fet
 ## Deep Research
 
 A composer **Deep Research** toggle turns a normal chat turn into a research run: the
-agent scopes the request, gathers sources from the live web, and streams a **cited report inline in the
-chat message** (not a side panel) beneath a collapsible **Research** activity panel that shows the plan
-and each live search/source as it happens.
+agent scopes the request, gathers sources from the live web, and delivers a **cited report as a markdown
+side-panel artifact** (which appears when ready) beneath a collapsible **Research** activity panel that
+shows the plan and each live search/source as it happens.
 
 ### Clarify → answer → report
 
@@ -261,8 +271,9 @@ Deep Research is **two-phase**:
    audience, and constraints.
 2. **Research + report.** On the next turn — the user's answers — the agent runs the full pipeline: it
    emits a **plan** (title + ~4 subtopics, each with search queries), fires the searches and page reads,
-   then streams the final **report** as ordinary `delta` events so it renders as the assistant message's
-   content, with inline source citations.
+   then synthesizes the final **report**. The report is delivered as a **markdown side-panel artifact**
+   (buffered and emitted as a `research_report` stream event) with inline source citations, alongside a
+   short lead-in in the chat message.
 
 ### What a run does
 
@@ -286,6 +297,145 @@ Deep Research adds **no new transport or network primitives** — it rides the s
 
 See **§11** of `CONTRACTS.md` for the wire contract: the request flag, the new stream events and state
 types, the two-phase route logic, and the orchestrator/agent APIs.
+
+---
+
+## Artifacts
+
+Artifacts are self-contained pieces of content — a web page, a React component, a diagram, a report —
+that the model produces with dedicated tools and that render in a **split-pane side panel** next to the
+chat instead of inline. Each is **versioned**: every update is a new revision you can step through in the
+panel's history.
+
+### Model tools & renderers
+
+The model calls `create_artifact` / `update_artifact` / `rewrite_artifact` to open and revise an
+artifact. Seven kinds are supported — `html`, `react`, `markdown`, `svg`, `mermaid`, `code`, and
+`image` — each with its own renderer; HTML and React run inside a sandboxed frame. An `ArtifactChip` in
+the message opens the panel, and every artifact is browsable later from the **`/artifacts`** library.
+
+---
+
+## Projects
+
+Projects group related conversations into a workspace with shared context. A project carries **custom
+instructions** and a set of uploaded **knowledge files**; both are injected into the system prompt for
+every chat started inside the project, so the agent stays on-brief without repeating yourself.
+
+Manage projects at **`/projects`** (and `/projects/[id]`) or from the sidebar **Projects** nav — the
+detail view lets you edit instructions, upload/remove files, and see the conversations grouped under the
+project.
+
+---
+
+## Sites
+
+Sites turn a page into a first-class, publishable web property served at same-origin **`/s/<slug>`** under
+a strict CSP `sandbox`. Publishing follows a **draft-buffer → Save Version → Deploy** lifecycle: you edit
+a draft, snapshot it as a version, and flip the live pointer when ready (the dashboard flags a deployed
+version as stale once the draft moves ahead).
+
+### Custom backend tier
+
+Beyond static pages, a Site can opt into a **custom-compute backend**: sandboxed server functions with a
+per-site KV store, blob storage, and secrets, exposed as `/api/*` capability endpoints served at
+**`/s/[slug]/api/[...path]`** on an isolated datastore. Create and manage sites at **`/sites`** /
+`/sites/[id]`, publish from the **ArtifactPanel** ("Publish as Site"), or let the model call
+`create_site` / `update_site` / `deploy_site` (deploy is gated by an opt-in per-user auto-deploy flag).
+
+---
+
+## Coding Workspace & Diff Review
+
+Each conversation gets a **confined coding sandbox** — the `read_file` / `list_dir` / `grep_search` /
+`edit_file` / `write_file` / `run_shell` tools operate inside a path-jailed working directory. When the
+agent changes files, the turn grows a `+N/−M` **diff badge**.
+
+### Diff panel & rewind
+
+Clicking the badge opens a **split-pane workspace panel**: a file tree, a red/green diff view (scoped to
+the last turn or the whole session), inline comments, and a **rewind/restore** dialog that rolls the
+workspace back to the state at a prior turn. Diffs are reconstructed by replaying the persisted
+write/edit tool calls, so no git repo or live file watching is required. The panel is backed by the
+`/api/conversations/[id]/workspace` `diff` / `file` / `restore` routes.
+
+---
+
+## Parallel Subagents
+
+The `run_subagents` tool lets the lead agent fan a task out across **multiple independent worker agents**
+running concurrently. Each worker is read-only (web + read-only-fs toolset — no write, shell, artifact,
+MCP, or recursion) and streams its **live per-agent tool trace and timers** into a rich **Subagents**
+panel in the message. When the workers finish, their results are digested back to the lead agent to
+synthesize a final answer, and the panel collapses to a compact "Used N subagents" pill.
+
+---
+
+## Browser Control
+
+An optional built-in browser gives the agent a **per-conversation headless Chromium** session with
+**accessibility-tree grounding**: the model reads a structured a11y snapshot with stable `ref` handles
+and acts on them through a family of `browser_*` tools (navigate, click, type, snapshot, …). Live
+progress renders in a **Browser** panel in the message.
+
+This capability is **OFF by default**. The `browser_*` tools are only registered when
+`BROWSER_CONTROL_ENABLED=1` is set; without it, none of the browser surface is exposed to the model.
+
+---
+
+## Plugins & Skills
+
+Plugins bundle **Agent-Skills** (and optionally MCP servers) that extend what the agent can do. Install
+one from a **git URL** or a **local folder** in **Settings → Plugins**; the app clones it through a
+hardened, SSRF-guarded proxy and registers its skills.
+
+### Progressive disclosure & slash invocation
+
+Bundled skills are surfaced to the model through a single progressive-disclosure **`skill`** tool: only
+each skill's name + description sit in the prompt, the SKILL.md body loads on demand, and bundled files
+are jailed to the skill directory. Any `.mcp.json` servers a plugin ships are registered **disabled and
+untrusted** into the Connector flow. Users can also **hard-invoke** a skill directly with the composer's
+**`/` menu**, which honors the skill's `user-invocable` / `argument-hint` frontmatter (via
+`GET /api/skills`).
+
+---
+
+## Message branching
+
+You can revise the conversation without losing history. **Editing** a previous user message or
+**regenerating** an assistant reply creates a new **sibling version** rather than overwriting; a
+`‹ n/m ›` control on the message steps between versions. Under the hood the conversation is stored as a
+**tree** (`Message.parentId` + `Conversation.activeLeafId`): the server builds each turn's history from
+the parent→root path, so the branch you're viewing persists across reloads.
+
+---
+
+## Settings & personalization
+
+A multi-tab **Settings** modal (opened from the sidebar) centralizes account and app configuration across
+eight tabs: **General, Personalization, Connectors, Plugins, Notifications, Data Controls, Account,** and
+**Security**. It ships a real **light/dark theme** with an FOUC-free init, an **accent color**, and
+**global custom instructions** injected into every chat. The **Data Controls** tab wires real actions —
+export your data, delete all chats, and manage sessions — backed by `/api/user`, `/api/user/export`,
+`/api/user/chats`, and `/api/user/sessions`.
+
+The composer exposes a single unified **Model · Effort** picker (`ModelEffortPicker`) that merges model
+selection and reasoning-effort into one popover, with unsupported combinations dimmed.
+
+---
+
+## Motion & UI
+
+A small, **dependency-free CSS motion system** lives in `src/app/globals.css` — no animation library is
+added. It defines a compact vocabulary of opacity/transform entrance animations —
+`animate-fade-in-up` / `-down`, `animate-scale-in`, `animate-slide-in-right` / `-left` — plus
+`stagger-children` for cascaded list reveals and `motion-press` for tactile button feedback.
+
+It is applied app-wide: messages fade-and-rise in; right-side panels (Artifacts, Workspace, Site backend)
+slide in; modals fade + pop; dropdowns and menus open with a fade-down; and lists (sidebar conversations,
+project / site / schedule cards) reveal with a stagger. Everything honors the OS **`prefers-reduced-motion`**
+setting via a global reduced-motion reset — animations collapse to instant while still landing on their
+visible end state.
 
 ---
 
@@ -395,25 +545,58 @@ src/
       register/             credentials sign-up
       chat/                 POST → SSE streaming chat (owns framing events)
       conversations/        list / create / get / rename / delete
+        [id]/workspace/     coding-workspace diff / file / restore
+      artifacts/            artifact library
+      projects/             project CRUD + files + instructions
+      sites/                site CRUD + versions / deploy / backend / functions / data / secrets
+      schedules/            schedule CRUD + preview
+      cron/                 external-scheduler trigger endpoint
+      plugins/              plugin install / list / skills
+      skills/               installed-skill listing (slash menu)
+      user/                 profile, export, chats, sessions
       upload/               file & image uploads
       mcp/                  connector CRUD
         [id]/               get / update / delete
         [id]/connect/       probe + start OAuth
         oauth/callback/     OAuth redirect handler
     c/[id]/                 a conversation view
+    artifacts/              artifacts library page
+    projects/  projects/[id]/   projects dashboard + detail
+    sites/     sites/[id]/       sites dashboard + owner backend admin
+    s/[slug]/               public site (route.ts) + api/[...path] custom backend
+    schedules/              scheduled-tasks page
   components/
-    chat/                   Composer, MessageList, MessageItem, ThinkingBlock, pickers
-    sidebar/                conversation list + Settings entry
-    settings/               SettingsModal (Connectors UI)
+    chat/                   Composer, MessageList, MessageItem, ThinkingBlock, ModelEffortPicker
+    artifacts/              ArtifactPanel, ArtifactChip, library, renderers
+    projects/               project dashboard + detail UI
+    sites/                  site dashboard, detail, PublishSiteButton, SiteChip
+    workspace/              WorkspacePanel, DiffView, file tree, rewind dialog
+    schedules/              schedules UI
+    settings/               SettingsModal + 8 tabs (General…Security)
+    sidebar/                conversation / project / site / schedule nav
     markdown/ ui/ upload/ auth/
   hooks/                    useAutoScroll, useCopyToClipboard
   lib/
     agent.ts                streamChat — Agent setup + Responses streaming
-    tools/                  index.ts + get-current-time, run-javascript, web-search
+    openaiClient.ts         shared OpenAI/Azure client (breaks an import cycle)
+    tools/                  index.ts + built-in, artifacts, sites, coding-sandbox,
+                            run-subagents, browser, skill tools
+    artifacts.ts sites.ts conversations.ts toolActivity.ts
+    research/               Deep Research orchestrator
+    subagents/              parallel worker runner
+    browser/                headless-Chromium session + a11y grounding
+    workspace/ diff/        coding sandbox + diff reconstruction
+    sandbox/                path-jailed exec / confinement
+    projects/ sites/        project + site domain logic
+    plugins/                plugin install + skill resolution
+    schedule/               cron.ts, presets.ts, runner
+    user/                   settings / data-controls logic
+    net/                    safe-fetch.ts (SSRF guard)
     mcp/                    client.ts (JSON-RPC), oauth.ts (OAuth 2.1), index.ts (DTO/tokens)
     types.ts                StreamEvent, MODELS, DTOs — shared contracts
     auth.ts db.ts sse.ts storage.ts
-  store/                    chat.ts, mcp.ts (Zustand)
+  store/                    chat.ts, mcp.ts, plugins.ts, projects.ts,
+                            schedules.ts, settings.ts, user.ts (Zustand)
   middleware.ts             route protection
 CONTRACTS.md                authoritative conventions
 prisma/schema.prisma        data model

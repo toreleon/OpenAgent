@@ -216,7 +216,7 @@ export function ScheduleForm({ open, schedule, template, onClose }: ScheduleForm
       <div
         role="dialog"
         aria-modal="true"
-        className="flex h-full w-full max-w-[460px] flex-col border-l border-border bg-main shadow-2xl animate-fade-in"
+        className="flex h-full w-full max-w-[460px] flex-col border-l border-border bg-main shadow-2xl animate-slide-in-right"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">

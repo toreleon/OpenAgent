@@ -51,7 +51,7 @@ export function ActivityRow({ item }: { item: ToolItem }) {
   const error = item.status === "error";
 
   return (
-    <div className="flex items-center gap-2 py-0.5 text-[13px] leading-relaxed text-text-secondary">
+    <div className="flex animate-fade-in-up items-center gap-2 py-0.5 text-[13px] leading-relaxed text-text-secondary">
       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
         {running ? (
           <Loader2 size={13} className="animate-spin opacity-80" />

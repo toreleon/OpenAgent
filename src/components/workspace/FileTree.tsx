@@ -130,7 +130,7 @@ export function FileTree({
     );
   };
 
-  return <ul className="py-1">{sortedChildren(root).map((c) => renderNode(c, 0))}</ul>;
+  return <ul className="py-1 stagger-children">{sortedChildren(root).map((c) => renderNode(c, 0))}</ul>;
 }
 
 export default FileTree;

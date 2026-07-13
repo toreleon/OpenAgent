@@ -143,7 +143,7 @@ export function SiteDetailView({ siteId }: { siteId: string }) {
 
   return (
     <main className="flex-1 overflow-y-auto bg-main">
-      <div className="mx-auto w-full max-w-4xl px-6 py-8 sm:px-10">
+      <div className="animate-fade-in-up mx-auto w-full max-w-4xl px-6 py-8 sm:px-10">
         {/* Header */}
         <div className="flex flex-wrap items-center gap-3">
           <button

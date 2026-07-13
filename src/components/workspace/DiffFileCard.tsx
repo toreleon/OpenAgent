@@ -29,7 +29,7 @@ export function DiffFileCard({
   return (
     <div
       ref={registerRef}
-      className="overflow-hidden rounded-lg border border-border"
+      className="overflow-hidden rounded-lg border border-border animate-fade-in-up"
     >
       <button
         type="button"
