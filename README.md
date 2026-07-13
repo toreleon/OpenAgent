@@ -35,7 +35,7 @@ It runs against the public OpenAI API **or** any OpenAI-compatible endpoint (e.g
 - **MCP Connectors** — register remote Streamable-HTTP MCP servers with **full OAuth 2.1**: metadata discovery, dynamic client registration, PKCE, callback, and automatic token refresh. Server secrets/tokens never leave the server.
 - **Settings & personalization** — an 8-tab settings modal with real **light/dark theme**, accent color, global custom instructions, and data controls (export, delete chats, sessions); a unified **Model · Effort** composer picker.
 - **OpenAI / Azure-compatible** — point at OpenAI or any compatible endpoint with `OPENAI_BASE_URL` + `OPENAI_MODEL`.
-- **Motion & UI** — a dependency-free CSS animation system (entrance, stagger, tactile press) that honors `prefers-reduced-motion`; Markdown + KaTeX + syntax highlighting, Zustand stores, SQLite via Prisma.
+- **Motion & UI** — a dependency-free CSS animation system (entrance, stagger, tactile press) that honors `prefers-reduced-motion`; Markdown + KaTeX + syntax highlighting, Zustand stores, PostgreSQL via Prisma (local Supabase).
 
 ---
 
@@ -46,7 +46,7 @@ It runs against the public OpenAI API **or** any OpenAI-compatible endpoint (e.g
 | Framework     | Next.js 14 (App Router), React 18, TypeScript                       |
 | Agent runtime | `@openai/agents` over the OpenAI Responses API                      |
 | Auth          | NextAuth 4 (Credentials + GitHub), JWT, `@next-auth/prisma-adapter` |
-| Data          | Prisma 5 + SQLite (swap the datasource for Postgres/MySQL)          |
+| Data          | Prisma 5 + PostgreSQL (local Supabase; `supabase start` → Studio + Postgres) |
 | State (client)| Zustand                                                             |
 | UI            | Tailwind CSS, lucide-react, react-markdown + remark/rehype + KaTeX  |
 | Validation    | Zod                                                                 |
@@ -117,7 +117,9 @@ cp .env.example .env
 | `OPENAI_MODEL`    | no       | Force a specific model / Azure **deployment** name; overrides the UI picker for the actual request.      |
 | `NEXTAUTH_SECRET` | yes      | Session/JWT signing secret. Generate with `openssl rand -base64 32`.                                     |
 | `NEXTAUTH_URL`    | yes      | Public origin, no trailing slash. **Required for MCP OAuth** — the redirect URI is `${NEXTAUTH_URL}/api/mcp/oauth/callback`. |
-| `DATABASE_URL`    | yes      | Prisma datasource. Default `file:./dev.db` (SQLite).                                                      |
+| `DATABASE_URL`    | yes      | Prisma runtime datasource — PostgreSQL via local Supabase (`postgresql://postgres:postgres@127.0.0.1:54322/postgres?schema=public`). See `.env.example`. |
+| `DIRECT_URL`      | yes      | Direct (session-mode) connection for Prisma CLI schema ops (`db push`/migrate); locally the same 54322 endpoint. |
+| `SITES_DATA_URL` / `SITES_DATA_DIRECT_URL` | yes | Sites mini-app data plane — the `sites_data` schema, reached by a connection-limited role (runtime) / the owner (`db push`). |
 | `GITHUB_ID`       | no       | GitHub OAuth client id (enables the GitHub sign-in button).                                              |
 | `GITHUB_SECRET`   | no       | GitHub OAuth client secret.                                                                              |
 | `SCHEDULER_ENABLED` | no     | Set to `1` to start the in-process 60s ticker (needs a persistent Node server; leave blank on serverless). See **Scheduled tasks**. |
@@ -610,7 +612,7 @@ This template was code-reviewed (every exported function and route handler trace
 adversarially re-verified). The safe, no-tradeoff issues that surfaced have been **fixed**; the items
 that involve a genuine design decision are listed below as open.
 
-Genuine simplifications (intentional for a template): **SQLite** by default, **no automated test
+Genuine simplifications (intentional for a template): **local Postgres (Supabase)** by default, **no automated test
 suite**, MCP trust is a **per-connector toggle** rather than a per-call approval prompt, and OAuth
 **tokens are stored unencrypted at rest** (fine for local dev — encrypt or use a secrets manager in
 production).

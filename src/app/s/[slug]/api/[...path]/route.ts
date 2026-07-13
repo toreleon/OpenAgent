@@ -188,13 +188,38 @@ async function readJsonBody(req: Request): Promise<{ value: unknown } | { deny: 
   }
 }
 
+/**
+ * True for Prisma connection-pool-exhaustion errors: P2024 (timed out fetching a
+ * pooled connection) and P2037 (too many connections). The sites plane has its own
+ * small, capped pool, so a public write flood at /s/<slug> hits THIS instead of
+ * starving the app — answer fast and cleanly rather than as an opaque 500.
+ */
+function isPoolBusy(e: unknown): boolean {
+  const code = (e as { code?: string } | null)?.code;
+  return code === "P2024" || code === "P2037";
+}
+
+/** 503 + Retry-After for a momentarily saturated sites-data pool. */
+function busyResponse(): Response {
+  return new Response(JSON.stringify({ error: "busy" }), {
+    status: 503,
+    headers: { "content-type": "application/json", "retry-after": "2" },
+  });
+}
+
 /** Enforce the per-(site, ip) write rate limit; returns a 429 Response if over. */
 async function rateGuard(req: Request, siteId: string): Promise<Response | null> {
-  const allowed = await siteStore.checkWriteRate(siteId, ipBlock(req), {
-    windowSec: WRITE_WINDOW_SEC,
-    max: WRITE_MAX_PER_WINDOW,
-  });
-  return allowed ? null : json({ error: "rate_limited" }, 429);
+  try {
+    const allowed = await siteStore.checkWriteRate(siteId, ipBlock(req), {
+      windowSec: WRITE_WINDOW_SEC,
+      max: WRITE_MAX_PER_WINDOW,
+    });
+    return allowed ? null : json({ error: "rate_limited" }, 429);
+  } catch (e) {
+    // Under a flood the limiter's own write can exhaust the pool; fail closed.
+    if (isPoolBusy(e)) return busyResponse();
+    throw e;
+  }
 }
 
 function validName(s: string | undefined): s is string {
@@ -326,6 +351,7 @@ export async function PUT(req: Request, { params }: Params) {
     await siteStore.kvPut(r.siteId, target.collection, target.key, serialized, scope);
   } catch (e) {
     if (e instanceof SiteQuotaExceededError) return json({ error: "quota_exceeded" }, 413);
+    if (isPoolBusy(e)) return busyResponse();
     throw e;
   }
   return json({ ok: true }, 200, identity?.setCookie);
@@ -480,6 +506,7 @@ export async function POST(req: Request, { params }: Params) {
     id = await siteStore.docAppend(r.siteId, path[1], serialized);
   } catch (e) {
     if (e instanceof SiteQuotaExceededError) return json({ error: "quota_exceeded" }, 413);
+    if (isPoolBusy(e)) return busyResponse();
     throw e;
   }
   return json({ ok: true, id });

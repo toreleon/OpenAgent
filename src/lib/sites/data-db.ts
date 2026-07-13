@@ -40,16 +40,29 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 /**
- * Apply per-connection pragmas once per process. WAL is persistent (stored in the
- * DB file) but harmless to re-assert; busy_timeout is per-connection. Callers
- * that do a write should `await ensureSitesData()` first. Cached on globalThis so
- * it runs once across hot-reloads.
+ * True only on the legacy SQLite path (a `file:` SITES_DATA_URL, or the explicit
+ * SITES_DATA_IS_SQLITE=1 escape hatch on the rollback branch). The plane is
+ * Postgres by default, where the WAL/busy_timeout PRAGMAs below are invalid SQL.
+ */
+const SITES_DATA_IS_SQLITE =
+  (process.env.SITES_DATA_URL ?? "").startsWith("file:") ||
+  process.env.SITES_DATA_IS_SQLITE === "1";
+
+/**
+ * One-time per-process init for the sites datastore. On SQLite it applies the
+ * WAL + busy_timeout PRAGMAs (so concurrent public writers wait briefly instead
+ * of erroring). On Postgres this is a no-op: WAL is always-on server-side and
+ * MVCC means readers never block writers, so busy_timeout has no analogue.
+ * Callers that do a write should `await ensureSitesData()` first. Cached on
+ * globalThis so it runs once across hot-reloads.
  */
 export function ensureSitesData(): Promise<void> {
   if (!globalForSitesData.sitesDataInit) {
     globalForSitesData.sitesDataInit = (async () => {
-      // $queryRawUnsafe (not $executeRawUnsafe): these PRAGMAs return a row, and
-      // SQLite's execute path rejects result-returning statements.
+      if (!SITES_DATA_IS_SQLITE) return; // Postgres: nothing to assert.
+      // SQLite-only. $queryRawUnsafe (not $executeRawUnsafe): these PRAGMAs
+      // return a row, and SQLite's execute path rejects result-returning
+      // statements.
       await sitesDataDb.$queryRawUnsafe("PRAGMA journal_mode=WAL;");
       await sitesDataDb.$queryRawUnsafe("PRAGMA busy_timeout=5000;");
     })().catch((err) => {
@@ -156,6 +169,11 @@ export const siteStore = {
     scope = "shared",
   ): Promise<string> {
     await this.assertQuota(siteId, value.length, async (tx, quota) => {
+      // Serialize all writers of THIS key first: the byte delta below is computed
+      // from a baseline read, which under READ COMMITTED would otherwise be a
+      // non-locking snapshot two concurrent same-key writers could share and both
+      // subtract — drifting SiteUsage even though bumpUsage's increment is atomic.
+      await lockKvKey(tx, siteId, collection, key, scope);
       const existing = await tx.siteKV.findUnique({
         where: { siteId_collection_key_scope: { siteId, collection, key, scope } },
         select: { value: true },
@@ -179,15 +197,20 @@ export const siteStore = {
     scope = "shared",
   ): Promise<boolean> {
     return sitesDataDb.$transaction(async (tx) => {
+      // Same per-key serialization as kvPut, AND it fixes a lock-order inversion:
+      // bumpUsage (SiteUsage row lock) must run BEFORE the SiteKV delete so both
+      // put and delete take SiteUsage-then-SiteKV — otherwise a concurrent
+      // put+delete of one key deadlocks (ABBA).
+      await lockKvKey(tx, siteId, collection, key, scope);
       const existing = await tx.siteKV.findUnique({
         where: { siteId_collection_key_scope: { siteId, collection, key, scope } },
         select: { value: true },
       });
       if (!existing) return false;
+      await bumpUsage(tx, siteId, -utf8Bytes(existing.value), -1, Number.MAX_SAFE_INTEGER);
       await tx.siteKV.delete({
         where: { siteId_collection_key_scope: { siteId, collection, key, scope } },
       });
-      await bumpUsage(tx, siteId, -utf8Bytes(existing.value), -1, Number.MAX_SAFE_INTEGER);
       return true;
     });
   },
@@ -419,20 +442,42 @@ export const siteStore = {
    */
   async consumeEndpointBudget(siteId: string, endpointId: string): Promise<boolean> {
     const today = new Date().toISOString().slice(0, 10);
-    return sitesDataDb.$transaction(async (tx) => {
-      const ep = await tx.siteEndpoint.findFirst({
+    // Race-free consumption. The old read→compute-in-JS→absolute-SET was the same
+    // lost-update the migration closed in bumpUsage: under READ COMMITTED two
+    // concurrent proxy calls read the same callsToday and both wrote calls+1, so
+    // the budget (a spend/abuse control on secret-injected outbound calls) could
+    // be blown past. Here every counter mutation is an ATOMIC guarded updateMany
+    // whose WHERE re-checks against the latest committed row under its lock.
+
+    // 1. Roll the window over if the UTC day changed (only matches a stale row).
+    await sitesDataDb.siteEndpoint.updateMany({
+      where: { id: endpointId, siteId, dayStamp: { not: today } },
+      data: { callsToday: 0, dayStamp: today },
+    });
+
+    const ep = await sitesDataDb.siteEndpoint.findFirst({
+      where: { id: endpointId, siteId },
+      select: { dailyBudget: true },
+    });
+    if (!ep) return false;
+
+    // 2a. Unlimited budget (<=0): count best-effort, never gate.
+    if (ep.dailyBudget <= 0) {
+      await sitesDataDb.siteEndpoint.updateMany({
         where: { id: endpointId, siteId },
-        select: { callsToday: true, dayStamp: true, dailyBudget: true },
-      });
-      if (!ep) return false;
-      const calls = ep.dayStamp === today ? ep.callsToday : 0;
-      if (ep.dailyBudget > 0 && calls >= ep.dailyBudget) return false;
-      await tx.siteEndpoint.update({
-        where: { id: endpointId },
-        data: { callsToday: calls + 1, dayStamp: today },
+        data: { callsToday: { increment: 1 } },
       });
       return true;
+    }
+
+    // 2b. Consume one call IFF still under budget. The `callsToday < dailyBudget`
+    // predicate + `{ increment: 1 }` ride the row lock, so callsToday can never
+    // exceed dailyBudget no matter how many callers race. count===0 = spent.
+    const res = await sitesDataDb.siteEndpoint.updateMany({
+      where: { id: endpointId, siteId, dayStamp: today, callsToday: { lt: ep.dailyBudget } },
+      data: { callsToday: { increment: 1 } },
     });
+    return res.count > 0;
   },
 
   // ---- Owner-side data moderation (for the /sites/[id] dashboard) ----
@@ -614,10 +659,48 @@ type TxClient = Omit<
 >;
 
 /**
+ * Serialize all mutations of ONE logical KV key (put + delete) within a
+ * transaction via a Postgres transaction-scoped advisory lock. Two purposes:
+ *  1. kvPut's byte delta comes from a baseline read; without this, two concurrent
+ *     same-key writers share a READ COMMITTED snapshot and both subtract the same
+ *     old value, drifting SiteUsage (bumpUsage's increment is atomic, its INPUT
+ *     was not). The lock also covers the not-yet-existing-key case, which a row
+ *     `FOR UPDATE` cannot (no row to lock yet).
+ *  2. It removes the kvPut/kvDelete lock-order inversion by making same-key
+ *     put/delete strictly serial.
+ * The lock auto-releases at commit/rollback. No-op on the legacy SQLite path
+ * (single-writer already serializes; pg_advisory_* is Postgres-only SQL).
+ */
+async function lockKvKey(
+  tx: TxClient,
+  siteId: string,
+  collection: string,
+  key: string,
+  scope: string,
+): Promise<void> {
+  if (SITES_DATA_IS_SQLITE) return;
+  const k = `${siteId}|${collection}|${key}|${scope}`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${k}, 0))`;
+}
+
+/**
  * Adjust the denormalized SiteUsage counters by (deltaBytes, deltaRows) inside a
  * transaction, throwing SiteQuotaExceededError (which rolls the tx back) when the
  * resulting byte total would exceed `quota`. Negative deltas (deletes) never
  * throw and floor at 0.
+ *
+ * ATOMICITY (Postgres): the counter is bumped with an ATOMIC INCREMENT, not a
+ * read→compute-in-JS→absolute-SET. The old absolute pattern was a lost-update /
+ * quota-BYPASS under Postgres READ COMMITTED — two concurrent public writes read
+ * the same pre-write count via a non-locking snapshot and the second's absolute
+ * write clobbers the first, so both can pass the cap. (SQLite masked this for
+ * free: a snapshot txn that then wrote after another committed got
+ * SQLITE_BUSY_SNAPSHOT and rolled back.) `{ increment }` compiles to
+ * `INSERT ... ON CONFLICT (siteId) DO UPDATE SET bytes = "SiteUsage".bytes + $delta`,
+ * and Postgres takes a FOR UPDATE row lock before the DO UPDATE, so concurrent
+ * increments serialize; the RETURNed row therefore carries the true cumulative
+ * total, making the post-increment quota check correct without SELECT FOR UPDATE
+ * or SERIALIZABLE retries. Over-rejection (both roll back) is possible but safe.
  */
 async function bumpUsage(
   tx: TxClient,
@@ -626,18 +709,29 @@ async function bumpUsage(
   deltaRows: number,
   quota: number,
 ): Promise<void> {
-  const current = await tx.siteUsage.findUnique({ where: { siteId } });
-  const bytes = current?.bytes ?? 0;
-  const rows = current?.rows ?? 0;
-  const nextBytes = bytes + deltaBytes;
-  if (deltaBytes > 0 && nextBytes > quota) {
-    throw new SiteQuotaExceededError(siteId, nextBytes, quota);
-  }
-  const clampedBytes = Math.max(0, nextBytes);
-  const clampedRows = Math.max(0, rows + deltaRows);
-  await tx.siteUsage.upsert({
+  const row = await tx.siteUsage.upsert({
     where: { siteId },
-    create: { siteId, bytes: clampedBytes, rows: clampedRows },
-    update: { bytes: clampedBytes, rows: clampedRows },
+    create: {
+      siteId,
+      bytes: Math.max(0, deltaBytes),
+      rows: Math.max(0, deltaRows),
+    },
+    update: {
+      bytes: { increment: deltaBytes },
+      rows: { increment: deltaRows },
+    },
   });
+  if (deltaBytes > 0 && row.bytes > quota) {
+    // Rolls the enclosing interactive transaction back — the write is undone.
+    throw new SiteQuotaExceededError(siteId, row.bytes, quota);
+  }
+  // Deletes (negative deltas) never gate quota, but an atomic decrement can
+  // transiently drive a counter below 0 under concurrency. Floor it so the
+  // owner's usage display and future checks never see a negative — downward only.
+  if ((deltaBytes < 0 && row.bytes < 0) || (deltaRows < 0 && row.rows < 0)) {
+    await tx.siteUsage.update({
+      where: { siteId },
+      data: { bytes: Math.max(0, row.bytes), rows: Math.max(0, row.rows) },
+    });
+  }
 }

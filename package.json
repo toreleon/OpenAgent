@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "prisma generate",
+    "predev": "npm run db:generate",
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "npm run db:generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "db:push": "prisma db push"
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "db:generate": "prisma generate && prisma generate --schema=prisma/sites-data.prisma",
+    "db:push": "prisma db push && prisma db push --schema=prisma/sites-data.prisma",
+    "db:reset": "supabase db reset && npm run db:push"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

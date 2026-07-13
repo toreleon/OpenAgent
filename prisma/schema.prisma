@@ -1,13 +1,20 @@
 // Prisma schema for OpenAgent.
-// Provider: SQLite. DATABASE_URL="file:./dev.db"
+// Provider: PostgreSQL (local Supabase). DATABASE_URL points at the pooled/runtime
+// connection; DIRECT_URL at a direct (session-mode) connection used by Prisma CLI
+// schema ops (db push / migrate / introspect). Locally both point at the direct
+// Supabase Postgres on 127.0.0.1:54322. See docs/supabase-local-migration-design.md.
 
 generator client {
   provider = "prisma-client-js"
+  // "native" covers local macOS dev; add the debian target when building the
+  // standalone Docker image (Prisma query engine is platform-specific).
+  binaryTargets = ["native"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -122,8 +129,9 @@ model Message {
   // with the original — i.e. a sibling "version". The visible conversation is
   // the path from Conversation.activeLeafId up through parentId to a root, so
   // siblings under one parent are the selectable versions the UI pages through.
-  // Self-relation is emulated in app code (no Prisma relation) to match the
-  // SQLite/no-FK-enforcement convention used elsewhere in this schema.
+  // Self-relation is emulated in app code (no Prisma relation): this is a plain
+  // pointer column, so — unlike the declared @relation fields, which Postgres now
+  // enforces as real FKs — its integrity/cascade is managed in app code.
   parentId       String?
   role           String // "user" | "assistant" | "system" | "tool"
   content        String // Text
@@ -295,8 +303,8 @@ model McpServer {
   // Set when this server was registered from a plugin's bundled MCP config
   // (.mcp.json). Plain column, NOT a Prisma relation — uninstalling a plugin
   // deletes its bundled servers via an explicit deleteMany in application code
-  // (SQLite FK enforcement is off; cascades are emulated). Null for servers the
-  // user added by hand in the Connectors UI.
+  // (this is a plain pointer column, not a declared @relation, so its cascade is
+  // emulated rather than DB-enforced). Null for servers the user added by hand.
   pluginId String?
 
   createdAt  DateTime @default(now())

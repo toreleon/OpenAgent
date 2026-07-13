@@ -1,36 +1,44 @@
 // ---------------------------------------------------------------------------
-// ISOLATED datastore for the Sites "deployable mini-app" data plane (Phase 1).
+// ISOLATED datastore for the Sites "deployable mini-app" data plane.
 //
-// This is a SECOND, SEPARATE SQLite database + Prisma client, deliberately
-// distinct from the primary app DB (prisma/schema.prisma → dev.db). Rationale
-// (from the design's adversarial security review): SQLite is single-writer per
-// file, so anonymous PUBLIC writes to a Site's data must NEVER share a writer
-// with the app's authenticated traffic (login, chat) — else a write flood is a
-// whole-app DoS. Keeping it a separate schema/client also means the mini-app
-// feature touches NO shared file (no edit to the primary schema, no regen of the
-// main client) — important while the primary schema is concurrently edited.
+// This is a SEPARATE Prisma client + its OWN connection pool, pointed at a
+// dedicated Postgres SCHEMA (`sites_data`) inside the one local-Supabase
+// `postgres` database, and connecting as a low-privilege role created with a
+// small `CONNECTION LIMIT`. Rationale (post-migration): on SQLite the plane was a
+// second FILE because SQLite is single-writer-per-file, so anonymous PUBLIC
+// writes to a Site's data could never contend for the app's write lock. Postgres
+// is multi-writer (MVCC), so that free isolation is gone — but it is reproduced,
+// and improved, by partitioning the CONNECTION BUDGET instead of the file: this
+// client has its own capped pool backed by a `CONNECTION LIMIT` role, so a public
+// write flood at /s/<slug> queues on THIS pool and can never starve the primary
+// app's pool. Keeping it a separate client (NOT a single multiSchema client) is
+// therefore load-bearing — one client would merge the pools and re-open the DoS.
 //
 // The client is generated to a custom path (src/generated/sites-data-client,
 // gitignored) so it never clobbers the default @prisma/client. Access goes
-// exclusively through src/lib/sites/data-db.ts (WAL + busy_timeout + a
-// tenant-scoped repository whose methods take siteId as a required first arg).
+// exclusively through src/lib/sites/data-db.ts (a tenant-scoped repository whose
+// methods take siteId as a required first arg; on Postgres the old SQLite WAL/
+// busy_timeout PRAGMAs are guarded off — MVCC needs neither).
 //
-// There are NO cross-database foreign keys: every row references the primary
-// Site by its plain string id (`siteId`); orphan cleanup is done in app code
-// (the Site delete cascade), exactly like the app's other emulated cascades.
+// There are NO cross-schema foreign keys: every row references the primary Site
+// by its plain string id (`siteId`); orphan cleanup is done in app code (the Site
+// delete cascade), exactly like the app's other emulated cascades.
 //
+//   SITES_DATA_URL="postgresql://openagent_sites_rw:...@127.0.0.1:54322/postgres?schema=sites_data&connection_limit=5"
 //   prisma generate --schema=prisma/sites-data.prisma
-//   prisma db push  --schema=prisma/sites-data.prisma   (creates sites-data.db)
+//   prisma db push  --schema=prisma/sites-data.prisma   (uses SITES_DATA_DIRECT_URL, as owner)
 // ---------------------------------------------------------------------------
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../src/generated/sites-data-client"
+  provider      = "prisma-client-js"
+  output        = "../src/generated/sites-data-client"
+  binaryTargets = ["native"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("SITES_DATA_URL")
+  provider  = "postgresql"
+  url       = env("SITES_DATA_URL")
+  directUrl = env("SITES_DATA_DIRECT_URL")
 }
 
 /// Per-site backend config + master switch. Lives HERE (not as columns on the
