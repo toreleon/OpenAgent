@@ -16,20 +16,27 @@ import { isSiteType } from "@/lib/types";
  * Keep the tool `name` values in sync with ARTIFACT_TOOL_NAMES in @/lib/types.
  */
 
+// NOTE: 'code' is deliberately NOT a creatable kind (Claude-Code-style artifacts:
+// an artifact is a RENDERED capture — page/document/diagram/app — never raw
+// source). Code answers belong in fenced markdown blocks or workspace files. The
+// DATA layer still accepts 'code' so historical code artifacts keep rendering.
 const TYPE_DESCRIPTION =
-  "The artifact kind: 'code' (syntax-highlighted source; also set `language`), " +
-  "'markdown' (a rich text document), 'html' (a self-contained web page rendered " +
-  "in a sandboxed iframe), 'svg' (an SVG image), 'image' (an image or data URL), " +
-  "'mermaid' (a Mermaid diagram), or " +
-  "'react' (a self-contained interactive React component with a default export).";
+  "The artifact kind: 'markdown' (a rich text document), 'html' (a self-contained " +
+  "web page rendered in a sandboxed iframe), 'svg' (an SVG image), 'image' (an " +
+  "image or data URL), 'mermaid' (a Mermaid diagram), or " +
+  "'react' (a self-contained interactive React component with a default export). " +
+  "There is NO 'code' kind — never make an artifact out of plain source code.";
 
 export const createArtifactTool: Tool = tool({
   name: "create_artifact",
   description:
-    "Create a new artifact shown to the user in a side panel. Use for substantial, " +
-    "self-contained, reusable content the user will likely edit, reuse, or preview: " +
-    "code files (>15 lines), full documents, HTML pages, SVG/diagrams, or interactive " +
-    "React components. Do NOT use for short snippets, explanations, or conversational " +
+    "Create a new artifact shown to the user in a side panel: a RENDERED, " +
+    "self-contained deliverable — a rich document, complete web page, SVG image, " +
+    "Mermaid diagram, or interactive React app — that the user will view, keep, or " +
+    "publish. NEVER use an artifact for source code: code answers of ANY length " +
+    "belong in fenced Markdown blocks in your reply (or in workspace files via " +
+    "write_file for coding tasks); wrapping plain code in a 'markdown' or 'html' " +
+    "artifact is also wrong. Do NOT use for short snippets or conversational " +
     "replies. After creating, do not repeat the artifact's full content in your message.",
   parameters: z.object({
     identifier: z
@@ -40,19 +47,11 @@ export const createArtifactTool: Tool = tool({
           "rewrite_artifact to revise it.",
       ),
     type: z
-      .enum(["code", "markdown", "html", "svg", "image", "mermaid", "react"])
+      .enum(["markdown", "html", "svg", "image", "mermaid", "react"])
       .describe(TYPE_DESCRIPTION),
     title: z
       .string()
       .describe("A concise human-readable title shown in the panel header."),
-    language: z
-      .string()
-      .nullable()
-      .optional()
-      .describe(
-        "For type='code' only: the source language (e.g. 'python', 'typescript'). " +
-          "Omit or null for other types.",
-      ),
     content: z
       .string()
       .describe(
@@ -126,11 +125,10 @@ export const publishArtifactTool: Tool = tool({
     "Publish an existing artifact to a durable, shareable PUBLIC URL — the way to " +
     "turn a preview into a real, linkable page/app. Use when the user asks to " +
     "publish, share, deploy, or make a link for an artifact they can send to others. " +
-    "Only previewable artifacts can be published — 'html', 'react', 'markdown', " +
-    "'svg', or 'mermaid' (not plain 'code'). Publishing again with the same " +
-    "identifier updates the SAME live URL to the latest version. Whether it goes " +
-    "fully live is gated by the user's auto-publish opt-in; otherwise it saves a " +
-    "deployable version for the user to publish with one click.",
+    "Publishing again with the same identifier updates the SAME live URL to the " +
+    "latest version. Whether it goes fully live is gated by the user's auto-publish " +
+    "opt-in; otherwise it saves a deployable version for the user to publish with " +
+    "one click.",
   parameters: z.object({
     identifier: z
       .string()

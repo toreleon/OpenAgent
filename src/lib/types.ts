@@ -688,7 +688,11 @@ export interface McpConnectResponse {
 
 /**
  * The kind of an artifact, which determines how the panel renders it:
- * - "code"     — syntax-highlighted source (has a `language`); no live preview
+ * - "code"     — LEGACY: syntax-highlighted source (has a `language`); no live
+ *                preview. The model can no longer create these (Claude-Code-style:
+ *                an artifact is a rendered capture, never raw source — code goes
+ *                in fenced blocks or workspace files). Kept in the union +
+ *                ARTIFACT_TYPES so historical rows still validate and render.
  * - "markdown" — rendered as Markdown (Preview) or raw (Code)
  * - "html"     — a full HTML document rendered in a sandboxed iframe
  * - "svg"      — an SVG image rendered in a sandboxed iframe
