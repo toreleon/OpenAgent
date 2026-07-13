@@ -1,6 +1,9 @@
 import { tool } from "@openai/agents";
 import { z } from "zod";
 import type { Tool } from "@openai/agents";
+import prisma from "@/lib/db";
+import { userIdFromContext, conversationIdFromContext } from "@/lib/sandbox/confine";
+import { isSiteType } from "@/lib/types";
 
 /**
  * The artifact tools. These are "capture" tools: their job is to carry the
@@ -117,9 +120,78 @@ export const rewriteArtifactTool: Tool = tool({
   },
 });
 
+export const publishArtifactTool: Tool = tool({
+  name: "publish_artifact",
+  description:
+    "Publish an existing artifact to a durable, shareable PUBLIC URL — the way to " +
+    "turn a preview into a real, linkable page/app. Use when the user asks to " +
+    "publish, share, deploy, or make a link for an artifact they can send to others. " +
+    "Only previewable artifacts can be published — 'html', 'react', 'markdown', " +
+    "'svg', or 'mermaid' (not plain 'code'). Publishing again with the same " +
+    "identifier updates the SAME live URL to the latest version. Whether it goes " +
+    "fully live is gated by the user's auto-publish opt-in; otherwise it saves a " +
+    "deployable version for the user to publish with one click.",
+  parameters: z.object({
+    identifier: z
+      .string()
+      .describe(
+        "The identifier of the artifact to publish (as used when it was created).",
+      ),
+  }),
+  async execute({ identifier }, ctx) {
+    const userId = userIdFromContext(ctx);
+    const conversationId = conversationIdFromContext(ctx);
+    // Run the SAME read-only guards the server-side publishArtifact will (the real
+    // work happens in /api/chat, which only console.errors on failure), so the
+    // model-facing ack matches what actually happens. Read-only — no mutation — so
+    // it is safe to run concurrently with the route's real publish (which resolves
+    // the artifact again). We deliberately do NOT call publishArtifact here: that
+    // would race the route and create a duplicate shadow Site.
+    if (userId && conversationId && identifier) {
+      const artifact = await prisma.artifact.findFirst({
+        where: { conversationId, identifier, conversation: { userId } },
+        include: { versions: { orderBy: { version: "desc" }, take: 1 } },
+      });
+      if (!artifact) {
+        return (
+          `Could not find an artifact "${identifier}" to publish. Ask the user which ` +
+          "artifact to publish (use the identifier from when it was created); nothing was published."
+        );
+      }
+      if (!isSiteType(artifact.type)) {
+        return (
+          `The "${identifier}" artifact is type "${artifact.type}", which can't be published — ` +
+          "only html, react, markdown, svg, or mermaid can. Nothing was published."
+        );
+      }
+      if (!artifact.versions[0]) {
+        return `The "${identifier}" artifact has no content yet, so there is nothing to publish.`;
+      }
+    }
+    if (userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { sitesAutoDeploy: true },
+      });
+      if (user?.sitesAutoDeploy) {
+        return (
+          "Auto-publish is on — published the artifact to its live public URL, shown " +
+          "in the panel. Tell the user it's now live and share the link."
+        );
+      }
+    }
+    return (
+      "Saved the artifact as a deployable version but did NOT make it public (the " +
+      "user hasn't enabled auto-publish). Ask the user to click Publish in the " +
+      "artifact panel to make it live, or to enable auto-publish in settings."
+    );
+  },
+});
+
 /** All artifact tools, registered together in the agent's tool set. */
 export const artifactTools: Tool[] = [
   createArtifactTool,
   updateArtifactTool,
   rewriteArtifactTool,
+  publishArtifactTool,
 ];

@@ -9,7 +9,6 @@ import {
   Check,
   FolderClosed,
   FolderKanban,
-  Globe,
   LogOut,
   MoreHorizontal,
   PanelLeft,
@@ -139,8 +138,10 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
   }
 
   const schedulesActive = pathname === "/schedules";
-  const artifactsActive = pathname === "/artifacts";
-  const sitesActive = pathname === "/sites" || pathname.startsWith("/sites/");
+  // "Artifacts" is now the single home for both in-chat artifacts and published
+  // (formerly "Sites") pages — /sites/[id] survives only as the per-artifact
+  // management page, reached from the Artifacts library, not a top-level nav.
+  const artifactsActive = pathname === "/artifacts" || pathname.startsWith("/sites/");
   const projectsActive = pathname === "/projects" || pathname.startsWith("/projects/");
 
   function beginRename(c: ConversationSummary) {
@@ -182,13 +183,6 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
             onClick={() => router.push("/artifacts")}
           >
             <Boxes size={20} />
-          </IconButton>
-          <IconButton
-            label="Sites"
-            active={sitesActive}
-            onClick={() => router.push("/sites")}
-          >
-            <Globe size={20} />
           </IconButton>
           <IconButton
             label="Scheduled"
@@ -262,19 +256,6 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         >
           <Boxes size={18} />
           Artifacts
-        </button>
-        <button
-          type="button"
-          onClick={() => router.push("/sites")}
-          className={cn(
-            "motion-press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
-            sitesActive
-              ? "bg-hover text-text-primary"
-              : "text-text-primary hover:bg-hover",
-          )}
-        >
-          <Globe size={18} />
-          Sites
         </button>
       </div>
 

@@ -734,14 +734,19 @@ export const ARTIFACT_TOOL_NAMES = {
   create: "create_artifact",
   update: "update_artifact",
   rewrite: "rewrite_artifact",
+  // The fourth verb on the one noun: publish an existing artifact to a durable,
+  // shareable public URL (creates/links a shadow Site under the hood). Replaces
+  // the retired create_site/update_site/deploy_site model tools.
+  publish: "publish_artifact",
 } as const;
 
-/** True if `name` is one of the artifact tool names. */
+/** True if `name` is one of the artifact tool names (incl. publish). */
 export function isArtifactToolName(name: string): boolean {
   return (
     name === ARTIFACT_TOOL_NAMES.create ||
     name === ARTIFACT_TOOL_NAMES.update ||
-    name === ARTIFACT_TOOL_NAMES.rewrite
+    name === ARTIFACT_TOOL_NAMES.rewrite ||
+    name === ARTIFACT_TOOL_NAMES.publish
   );
 }
 

@@ -546,6 +546,123 @@ export async function createSiteFromArtifact(
   return detail;
 }
 
+export type PublishArtifactResult =
+  | { ok: true; siteId: string; snapshot: SiteSnapshot; ref: SiteRef; detail: SiteDetail }
+  | { ok: false; error: string };
+
+/**
+ * Publish an artifact to a shareable public URL — the unified-Artifacts publish
+ * choke-point shared by the model tool (`publish_artifact`, via /api/chat) and the
+ * human Publish button (POST /api/artifacts/publish). It is the ONLY place that
+ * mutates the Artifact.publishedSiteId <-> Site.sourceArtifactId pairing.
+ *
+ * Resolves the artifact (by id, or by conversation+identifier), then create-or-
+ * reuses its shadow Site seeded from the artifact's latest version, and:
+ *  - `makePublic: true`  -> flip visibility to `link` and deploy (moves the live
+ *    pointer so /s/<slug> serves it). This is the human Publish and the model path
+ *    when the user opted into auto-publish.
+ *  - `makePublic: false` -> save a deployable candidate WITHOUT going public (the
+ *    model path when auto-publish is off; the user publishes with one click later).
+ * Always links Artifact.publishedSiteId -> the Site (a plain pointer; the Site is
+ * user-owned and OUTLIVES the ephemeral artifact).
+ *
+ * Postgres note: each step runs as its own implicit transaction. Do NOT wrap this
+ * (its appendVersion retry-on-collision loop) in an interactive prisma.$transaction()
+ * — a unique-constraint violation aborts the whole tx and the retry's re-read fails.
+ */
+export async function publishArtifact(
+  prisma: PrismaClient,
+  params: {
+    userId: string;
+    makePublic: boolean;
+    messageId?: string | null;
+    artifactId?: string;
+    conversationId?: string;
+    identifier?: string;
+  },
+): Promise<PublishArtifactResult> {
+  const { userId, makePublic } = params;
+  const where = params.artifactId
+    ? { id: params.artifactId, conversation: { userId } }
+    : params.conversationId && params.identifier
+      ? {
+          conversationId: params.conversationId,
+          identifier: params.identifier,
+          conversation: { userId },
+        }
+      : null;
+  if (!where) {
+    return { ok: false, error: "publish: an artifactId or (conversationId + identifier) is required" };
+  }
+
+  const artifact = await prisma.artifact.findFirst({
+    where,
+    include: { versions: { orderBy: { version: "desc" }, take: 1 } },
+  });
+  if (!artifact) return { ok: false, error: "publish: artifact not found" };
+  if (!isSiteType(artifact.type)) {
+    return {
+      ok: false,
+      error: `publish: artifacts of type "${artifact.type}" can't be published (only html, react, markdown, svg, mermaid).`,
+    };
+  }
+  const latest = artifact.versions[0];
+  if (!latest) return { ok: false, error: "publish: the artifact has no content yet" };
+
+  // Create-or-reuse the shadow Site. Reuse when this artifact was already published
+  // AND the pointed-to Site still exists and is owned by the user; else make one.
+  let siteId: string | null = null;
+  if (artifact.publishedSiteId) {
+    const existing = await prisma.site.findFirst({
+      where: { id: artifact.publishedSiteId, userId },
+      select: { id: true },
+    });
+    if (existing) {
+      siteId = existing.id;
+      // Refresh the shadow Site's draft from the artifact's current content so the
+      // version we deploy reflects the latest edits.
+      await prisma.site.update({
+        where: { id: siteId },
+        data: {
+          name: artifact.title,
+          draftType: artifact.type,
+          draftContent: latest.content,
+          draftLanguage: artifact.language,
+        },
+      });
+    }
+  }
+  if (!siteId) {
+    const created = await createSiteFromArtifact(prisma, userId, { artifactId: artifact.id });
+    if ("error" in created) return { ok: false, error: `publish: ${created.error}` };
+    siteId = created.id;
+  }
+
+  if (makePublic) {
+    // The public gate is visibility==='link' AND a live version — set both.
+    await prisma.site.update({ where: { id: siteId }, data: { visibility: "link" } });
+    const deployed = await deploySite(prisma, userId, siteId, { messageId: params.messageId ?? null });
+    if (!deployed) return { ok: false, error: "publish: failed to deploy" };
+  } else {
+    await saveSiteVersion(prisma, userId, siteId, { messageId: params.messageId ?? null });
+  }
+
+  // Link the artifact -> its published Site (plain pointer; see schema comment).
+  await prisma.artifact.update({
+    where: { id: artifact.id },
+    data: { publishedSiteId: siteId },
+  });
+
+  const row = await reloadSite(prisma, siteId);
+  return {
+    ok: true,
+    siteId,
+    snapshot: serializeSnapshot(row, "deploy"),
+    ref: buildRef(row, "deploy"),
+    detail: serializeSiteDetail(row),
+  };
+}
+
 /** Update a Site's editable metadata / draft (rename, visibility, editor edits). */
 export async function updateSiteMeta(
   prisma: PrismaClient,

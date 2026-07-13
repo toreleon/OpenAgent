@@ -42,11 +42,12 @@ export const agentTools: Tool[] = [
   webFetchTool,
   runJavascriptTool,
   getCurrentTimeTool,
+  // The four artifact verbs on one noun: create / update / rewrite / publish.
+  // publish_artifact turns an artifact into a shareable public page by creating or
+  // updating a shadow Site under the hood (intercepted by /api/chat, deploy gated by
+  // the user's sitesAutoDeploy opt-in). The old create_site/update_site/deploy_site
+  // model tools are retired — Sites are now published artifacts, not a separate noun.
   ...artifactTools,
-  // Sites: build + publish a standalone, shareable web page (create/update/deploy).
-  // Intercepted by /api/chat like the artifact tools; deploy is gated by the
-  // user's sitesAutoDeploy opt-in. See src/lib/sites.ts.
-  ...siteTools,
   // Coding sandbox (local, per-conversation workspace).
   readFileTool,
   listDirTool,

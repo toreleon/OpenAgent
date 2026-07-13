@@ -16,12 +16,13 @@ import {
   applyArtifactCommand,
   toolNameToArtifactCommand,
 } from "@/lib/artifacts";
-import { applySiteCommand, toolNameToSiteCommand } from "@/lib/sites";
+import { applySiteCommand, toolNameToSiteCommand, publishArtifact } from "@/lib/sites";
 import {
   MODELS,
   DEFAULT_MODEL,
   REASONING_EFFORTS,
   DEFAULT_EFFORT,
+  ARTIFACT_TOOL_NAMES,
   isArtifactToolName,
   isSiteToolName,
   isSubagentToolName,
@@ -930,6 +931,43 @@ export async function POST(req: Request) {
                   }
                 } catch (err) {
                   console.error("[chat] artifact persistence error:", err);
+                }
+                break;
+              }
+              // publish_artifact is the unified "publish" verb: it turns an existing
+              // artifact into a shareable public page by create-or-reusing a shadow
+              // Site. It reuses the `site` event + SiteRef plumbing (so the result
+              // shows the live URL). Going fully public is gated by sitesAutoDeploy —
+              // otherwise a deployable candidate is saved and the user clicks Publish.
+              if (event.name === ARTIFACT_TOOL_NAMES.publish) {
+                siteAttempted = true;
+                try {
+                  if (sitesAutoDeploy === null) {
+                    const u = await prisma.user.findUnique({
+                      where: { id: userId },
+                      select: { sitesAutoDeploy: true },
+                    });
+                    sitesAutoDeploy = u?.sitesAutoDeploy ?? false;
+                  }
+                  const identifier =
+                    typeof (event.args as { identifier?: unknown })?.identifier === "string"
+                      ? (event.args as { identifier: string }).identifier
+                      : "";
+                  const result = await publishArtifact(prisma, {
+                    userId,
+                    conversationId,
+                    identifier,
+                    messageId: assistantMessageId,
+                    makePublic: sitesAutoDeploy,
+                  });
+                  if (result.ok) {
+                    siteRefs.push(result.ref);
+                    send({ type: "site", command: "deploy", site: result.snapshot });
+                  } else {
+                    console.error("[chat] publish_artifact failed:", result.error);
+                  }
+                } catch (err) {
+                  console.error("[chat] publish_artifact error:", err);
                 }
                 break;
               }

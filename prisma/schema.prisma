@@ -174,6 +174,16 @@ model Artifact {
   title          String
   // Language hint for "code" artifacts (e.g. "python"); null for other types.
   language       String?
+  // ---- PUBLISH (unified Artifacts): forward pointer to the shadow Site this
+  // artifact is published as. PLAIN column, NOT a Prisma @relation — deliberately,
+  // so the now-real Postgres FK cascades never apply: a published Site must OUTLIVE
+  // the ephemeral Artifact (deleting the chat cascades the Artifact away, but the
+  // Site is user-owned and stays live). App-nulled if the Site is deleted; the
+  // single publish/unpublish choke-point keeps it in sync with Site.sourceArtifactId.
+  publishedSiteId String?
+  // Provenance for Customize/remix: the Site this artifact was forked from (plain
+  // pointer, app-managed). Null unless created via remixSiteToArtifact (Phase 2+).
+  remixedFromSiteId String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

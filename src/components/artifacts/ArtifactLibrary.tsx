@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, FileText, Search } from "lucide-react";
+import { Boxes, ExternalLink, FileText, Globe, Search, Settings2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { artifactHasPreview } from "@/lib/types";
-import type { ArtifactLibraryItem, ArtifactType } from "@/lib/types";
+import type {
+  ArtifactLibraryItem,
+  ArtifactType,
+  SiteStatus,
+  SiteSummary,
+} from "@/lib/types";
 import { ArtifactRenderer } from "./ArtifactRenderer";
+
+/** Live-status pill copy + tone for a published artifact (formerly a "Site"). */
+const STATUS_META: Record<SiteStatus, { label: string; className: string }> = {
+  deployed: { label: "Live", className: "bg-green-500/15 text-green-500" },
+  "deployed-stale": { label: "Live · newer draft", className: "bg-amber-500/15 text-amber-500" },
+  draft: { label: "Not published", className: "bg-hover text-text-secondary" },
+};
 
 const FILTER_OPTIONS: Array<{ value: "all" | ArtifactType; label: string }> = [
   { value: "all", label: "All artifacts" },
@@ -37,6 +49,7 @@ function editedAt(iso: string): string {
 export function ArtifactLibrary() {
   const router = useRouter();
   const [artifacts, setArtifacts] = useState<ArtifactLibraryItem[]>([]);
+  const [sites, setSites] = useState<SiteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -44,13 +57,21 @@ export function ArtifactLibrary() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/artifacts", { cache: "no-store" })
-      .then(async (res) => {
+    // Two feeds: the cross-conversation in-chat artifacts (/api/artifacts) and the
+    // PUBLISHED artifacts — the former Sites — as live pages (/api/sites).
+    void Promise.all([
+      fetch("/api/artifacts", { cache: "no-store" }).then(async (res) => {
         if (!res.ok) throw new Error("Could not load artifacts");
         return (await res.json()) as ArtifactLibraryItem[];
-      })
-      .then((items) => {
-        if (!cancelled) setArtifacts(items);
+      }),
+      fetch("/api/sites", { cache: "no-store" })
+        .then(async (res) => (res.ok ? ((await res.json()) as SiteSummary[]) : []))
+        .catch(() => [] as SiteSummary[]),
+    ])
+      .then(([artifactItems, siteItems]) => {
+        if (cancelled) return;
+        setArtifacts(artifactItems);
+        setSites(siteItems);
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -66,6 +87,11 @@ export function ArtifactLibrary() {
     };
   }, []);
 
+  const visibleSites = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return sites.filter((s) => !q || `${s.name} ${s.slug}`.toLowerCase().includes(q));
+  }, [sites, query]);
+
   const visibleArtifacts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return artifacts.filter((artifact) => {
@@ -74,6 +100,57 @@ export function ArtifactLibrary() {
       return matchesType && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
   }, [artifacts, query, type]);
+
+  // Live published pages vs. saved-but-not-yet-public candidates — kept in separate
+  // sections so a "Not published" card never sits under a "Published" heading.
+  const liveSites = useMemo(() => visibleSites.filter((s) => s.status !== "draft"), [visibleSites]);
+  const draftSites = useMemo(() => visibleSites.filter((s) => s.status === "draft"), [visibleSites]);
+  const filtering = query.trim().length > 0 || type !== "all";
+
+  const renderSiteCard = (site: SiteSummary) => {
+    const meta = STATUS_META[site.status];
+    const live = site.status !== "draft";
+    return (
+      <article
+        key={site.id}
+        className="flex flex-col rounded-xl border border-border bg-sidebar p-4 text-left"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-hover text-accent">
+            <Globe size={17} />
+          </span>
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${meta.className}`}
+          >
+            {meta.label}
+          </span>
+        </div>
+        <h3 className="mt-3 truncate text-sm font-medium text-text-primary">{site.name}</h3>
+        <p className="mt-0.5 truncate text-xs text-text-secondary">
+          {live ? site.publicPath : "Saved — publish to get a public link"}
+        </p>
+        <div className="mt-4 flex items-center gap-2">
+          {live && (
+            <a
+              href={site.publicPath}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+            >
+              <ExternalLink size={13} /> Open
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={() => router.push(`/sites/${site.id}`)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+          >
+            <Settings2 size={13} /> Manage
+          </button>
+        </div>
+      </article>
+    );
+  };
 
   return (
     <main className="flex-1 overflow-y-auto bg-main">
@@ -105,22 +182,54 @@ export function ArtifactLibrary() {
           />
         </div>
 
+        {!loading && !error && liveSites.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">
+              Published
+            </h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-children">
+              {liveSites.map(renderSiteCard)}
+            </div>
+          </section>
+        )}
+
+        {!loading && !error && draftSites.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">
+              Ready to publish
+            </h2>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-children">
+              {draftSites.map(renderSiteCard)}
+            </div>
+          </section>
+        )}
+
         {loading ? (
           <p className="py-12 text-sm text-text-secondary">Loading artifacts…</p>
         ) : error ? (
           <p className="py-12 text-sm text-danger">{error}</p>
-        ) : visibleArtifacts.length === 0 ? (
+        ) : visibleArtifacts.length === 0 && visibleSites.length === 0 ? (
           <div className="flex flex-col items-center py-20 text-center">
             <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-hover text-text-secondary">
               <Boxes size={22} />
             </span>
-            <h2 className="font-medium text-text-primary">No artifacts found</h2>
+            <h2 className="font-medium text-text-primary">
+              {filtering ? "No matching artifacts" : "No artifacts yet"}
+            </h2>
             <p className="mt-1 max-w-sm text-sm text-text-secondary">
-              Artifacts you create in chats will appear here.
+              {filtering
+                ? "No artifacts match your search or filter. Try a different query."
+                : "Artifacts you create in chats appear here — publish one to get a shareable link."}
             </p>
           </div>
-        ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-children">
+        ) : visibleArtifacts.length === 0 ? null : (
+          <section className="mt-8">
+            {visibleSites.length > 0 && (
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">
+                Recent
+              </h2>
+            )}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-children">
             {visibleArtifacts.map((artifact) => {
               const latest = artifact.versions.at(-1);
               const latestVersion = latest?.version ?? 1;
@@ -174,7 +283,8 @@ export function ArtifactLibrary() {
                 </article>
               );
             })}
-          </div>
+            </div>
+          </section>
         )}
       </div>
     </main>
