@@ -73,7 +73,7 @@ function StatusIcon({ status }: { status: ResearchActivityStatus }) {
 function ActivityRow({ activity }: { activity: ResearchActivityEntry }) {
   const isSourceLink = activity.kind === "source" && !!activity.url;
   return (
-    <div className="flex items-center gap-2 py-0.5 text-[13px] leading-relaxed text-text-secondary">
+    <div className="flex animate-fade-in-up items-center gap-2 py-0.5 text-[13px] leading-relaxed text-text-secondary">
       <KindIcon kind={activity.kind} />
       {isSourceLink ? (
         <a

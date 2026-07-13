@@ -65,9 +65,9 @@ export function Dropdown({
         <div
           role="menu"
           className={cn(
-            "absolute z-50 min-w-[12rem] animate-fade-in rounded-xl border border-border bg-sidebar p-1.5 shadow-2xl",
+            "absolute z-50 min-w-[12rem] animate-scale-in rounded-xl border border-border bg-sidebar p-1.5 shadow-2xl",
             side === "bottom" ? "top-full mt-1.5" : "bottom-full mb-1.5",
-            align === "end" ? "right-0" : "left-0",
+            align === "end" ? "right-0 origin-top-right" : "left-0 origin-top",
             menuClassName,
           )}
         >

@@ -33,7 +33,7 @@ export function ModelPicker({
         <button
           type="button"
           disabled={disabled}
-          className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          className="motion-press inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
           {current.label}
           <ChevronDown size={15} className="opacity-70" />

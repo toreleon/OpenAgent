@@ -148,7 +148,7 @@ export function SchedulesApp() {
                     {filter === "paused" ? "No paused tasks." : "No active tasks."}
                   </p>
                 ) : (
-                  <ul className="flex flex-col divide-y divide-border/40">
+                  <ul className="stagger-children flex flex-col divide-y divide-border/40">
                     {visible.map((s) => (
                       <ScheduleRow key={s.id} schedule={s} onEdit={openEdit} />
                     ))}

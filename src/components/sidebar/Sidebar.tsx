@@ -219,7 +219,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
         <button
           type="button"
           onClick={handleNewChat}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover"
+          className="motion-press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover"
         >
           <PenSquare size={18} />
           New chat
@@ -228,7 +228,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
           type="button"
           onClick={() => router.push("/projects")}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+            "motion-press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
             projectsActive
               ? "bg-hover text-text-primary"
               : "text-text-primary hover:bg-hover",
@@ -241,7 +241,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
           type="button"
           onClick={() => router.push("/schedules")}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+            "motion-press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
             schedulesActive
               ? "bg-hover text-text-primary"
               : "text-text-primary hover:bg-hover",
@@ -254,7 +254,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
           type="button"
           onClick={() => router.push("/artifacts")}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+            "motion-press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
             artifactsActive
               ? "bg-hover text-text-primary"
               : "text-text-primary hover:bg-hover",
@@ -267,7 +267,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
           type="button"
           onClick={() => router.push("/sites")}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
+            "motion-press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm font-medium transition-colors",
             sitesActive
               ? "bg-hover text-text-primary"
               : "text-text-primary hover:bg-hover",
@@ -325,7 +325,7 @@ export function Sidebar({ open, onToggle }: SidebarProps) {
               <div className="px-2 py-2 text-xs font-medium text-text-secondary">
                 {group.label}
               </div>
-              <ul className="flex flex-col gap-0.5">
+              <ul className="stagger-children flex flex-col gap-0.5">
                 {group.items.map((c) => {
                   const active = c.id === currentId;
                   const editing = editingId === c.id;

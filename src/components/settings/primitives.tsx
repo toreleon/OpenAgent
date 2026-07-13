@@ -153,7 +153,7 @@ export function RowButton({
       onClick={onClick}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50",
+        "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 motion-press",
         danger
           ? "border-red-500/40 text-red-400 hover:bg-red-500/10"
           : "border-border text-text-primary hover:bg-hover",
@@ -218,7 +218,7 @@ export function ConfirmDialog({
             disabled={!canConfirm || loading}
             onClick={onConfirm}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 motion-press",
               danger
                 ? "bg-red-500 text-white hover:bg-red-600"
                 : "bg-text-primary text-main hover:opacity-90",

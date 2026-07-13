@@ -51,7 +51,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         role="dialog"
         aria-modal="true"
         className={cn(
-          "flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-main shadow-2xl animate-fade-in",
+          "flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-main shadow-2xl animate-scale-in origin-center",
           className,
         )}
       >

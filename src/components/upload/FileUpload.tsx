@@ -113,7 +113,7 @@ export function FileUpload({ onUploaded, disabled }: FileUploadProps): JSX.Eleme
         aria-label="Attach files"
         aria-describedby={error ? errorId : undefined}
         title="Attach files"
-        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        className="motion-press inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isUploading ? (
           <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
@@ -125,7 +125,7 @@ export function FileUpload({ onUploaded, disabled }: FileUploadProps): JSX.Eleme
         <span
           id={errorId}
           role="alert"
-          className="absolute bottom-full left-0 mb-2 w-max max-w-xs rounded-md border border-border bg-composer px-2 py-1 text-xs text-red-400 shadow-lg"
+          className="animate-scale-in origin-bottom absolute bottom-full left-0 mb-2 w-max max-w-xs rounded-md border border-border bg-composer px-2 py-1 text-xs text-red-400 shadow-lg"
         >
           {error}
         </span>

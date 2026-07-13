@@ -249,7 +249,7 @@ export function WorkspacePanel() {
   }, [readyComments.length, submitComments]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-main text-text-primary">
+    <div className="flex h-full w-full flex-col bg-main text-text-primary animate-slide-in-right">
       {/* Header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
         <FolderGit2 size={16} className="shrink-0 text-text-secondary" />
@@ -395,7 +395,7 @@ export function WorkspacePanel() {
             type="button"
             onClick={submitComments}
             disabled={readyComments.length === 0 || isStreaming}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="motion-press inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <SendHorizonal size={13} />
             Submit to agent

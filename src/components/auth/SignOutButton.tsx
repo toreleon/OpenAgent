@@ -19,7 +19,7 @@ export default function SignOutButton({ className }: SignOutButtonProps) {
       onClick={() => signOut({ callbackUrl: "/login" })}
       className={
         className ??
-        "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+        "motion-press flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
       }
     >
       <LogOut className="h-4 w-4" />

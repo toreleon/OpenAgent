@@ -96,7 +96,7 @@ export function PluginsTab() {
             No plugins yet. Install one from a git repo or a local folder.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2 stagger-children">
             {plugins.map((p) => (
               <PluginRow key={p.id} plugin={p} />
             ))}

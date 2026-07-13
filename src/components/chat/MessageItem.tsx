@@ -200,7 +200,7 @@ export function MessageItem({
     }
 
     return (
-      <div className="group flex w-full flex-col items-end py-3">
+      <div className="group flex w-full animate-fade-in-up flex-col items-end py-3">
         <AttachmentChips attachments={attachments} />
         {message.content && (
           <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-3xl bg-user-bubble px-5 py-2.5 text-text-primary">
@@ -254,7 +254,7 @@ export function MessageItem({
   const barVisible = isLast || hasVersions;
 
   return (
-    <div className="group flex w-full flex-col py-3">
+    <div className="group flex w-full animate-fade-in-up flex-col py-3">
       <ThinkingBlock
         timeline={message.timeline}
         toolCalls={message.toolCalls}

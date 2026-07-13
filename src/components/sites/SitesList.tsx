@@ -25,7 +25,7 @@ function SiteCard({ site }: { site: SiteSummary }) {
           open();
         }
       }}
-      className="group cursor-pointer overflow-hidden rounded-xl border border-border bg-sidebar text-left transition-colors hover:border-text-secondary/60 hover:bg-hover focus:outline-none focus:ring-2 focus:ring-accent"
+      className="group motion-press cursor-pointer overflow-hidden rounded-xl border border-border bg-sidebar text-left transition-colors hover:border-text-secondary/60 hover:bg-hover focus:outline-none focus:ring-2 focus:ring-accent"
     >
       <div className="relative h-36 overflow-hidden border-b border-border bg-white">
         <div className="pointer-events-none h-full w-full">
@@ -134,7 +134,7 @@ export function SitesList() {
             </p>
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="stagger-children mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((site) => (
               <SiteCard key={site.id} site={site} />
             ))}
