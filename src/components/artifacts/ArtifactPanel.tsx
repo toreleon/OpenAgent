@@ -28,6 +28,7 @@ import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/components/ui/cn";
 import { ArtifactRenderer } from "./ArtifactRenderer";
 import { DeviceFrame } from "./DeviceFrame";
+import { SnackEmbed } from "./SnackEmbed";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { PublishSiteButton } from "@/components/sites/PublishSiteButton";
 
@@ -128,6 +129,9 @@ export function ArtifactPanel() {
   const [mode, setMode] = useState<"preview" | "code">("preview");
   // Preview viewport chrome: "phone" wraps the renderer in a device frame.
   const [viewport, setViewport] = useState<"desktop" | "phone">("desktop");
+  // Mobile preview engine: "local" (react-native-web, instant) or "snack" (the
+  // real Expo runtime via an embedded Snack player — resolves npm libraries).
+  const [previewEngine, setPreviewEngine] = useState<"local" | "snack">("local");
   // Non-null while the last Capacitor export failed, shown to the user.
   const [exportError, setExportError] = useState<string | null>(null);
   const { copied, copy } = useCopyToClipboard();
@@ -139,6 +143,7 @@ export function ArtifactPanel() {
     if (artifact) {
       setMode(artifactHasPreview(artifact.type) ? "preview" : "code");
       setViewport(artifact.type === "mobile" ? "phone" : "desktop");
+      setPreviewEngine("local");
       setExportError(null);
     }
   }, [artifact?.id, artifact?.type]);
@@ -158,6 +163,15 @@ export function ArtifactPanel() {
 
   const hasPreview = artifactHasPreview(artifact.type);
   const TypeIcon = TYPE_ICONS[artifact.type];
+
+  const isMobile = artifact.type === "mobile";
+  const inPreview = hasPreview && mode === "preview";
+  // The Snack (real Expo runtime) engine is a mobile-only preview option.
+  const usingSnack = isMobile && previewEngine === "snack";
+  // Snack brings its own device chrome, so the phone-frame viewport toggle only
+  // applies to the local react-native-web preview.
+  const showViewportToggle =
+    inPreview && supportsPhoneFrame(artifact.type) && !usingSnack;
 
   // Version navigation over the ordered version list.
   const idx = versions.findIndex((v) => v.version === shownVersion.version);
@@ -252,7 +266,39 @@ export function ArtifactPanel() {
               </button>
             </div>
           )}
-          {hasPreview && mode === "preview" && supportsPhoneFrame(artifact.type) && (
+          {isMobile && inPreview && (
+            <div className="flex items-center rounded-lg border border-border p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setPreviewEngine("local")}
+                aria-pressed={previewEngine === "local"}
+                title="Local preview (react-native-web, instant)"
+                className={cn(
+                  "inline-flex items-center rounded-md px-2 py-1 transition-colors",
+                  previewEngine === "local"
+                    ? "bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                Local
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewEngine("snack")}
+                aria-pressed={previewEngine === "snack"}
+                title="Expo Snack (real Expo runtime; resolves npm libraries; run on device)"
+                className={cn(
+                  "inline-flex items-center rounded-md px-2 py-1 transition-colors",
+                  previewEngine === "snack"
+                    ? "bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                Snack
+              </button>
+            </div>
+          )}
+          {showViewportToggle && (
             <div className="flex items-center rounded-lg border border-border p-0.5 text-xs">
               <button
                 type="button"
@@ -329,19 +375,23 @@ export function ArtifactPanel() {
           always wraps it (so the preview iframe keeps its identity across viewport
           toggles) and draws the phone bezel only when `enabled`. */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        <DeviceFrame
-          enabled={
-            viewport === "phone" &&
-            mode === "preview" &&
-            supportsPhoneFrame(artifact.type)
-          }
-        >
-          <ArtifactRenderer
-            artifact={artifact}
-            version={shownVersion}
-            mode={mode}
-          />
-        </DeviceFrame>
+        {usingSnack && mode === "preview" ? (
+          <SnackEmbed content={shownVersion.content} name={artifact.title} />
+        ) : (
+          <DeviceFrame
+            enabled={
+              viewport === "phone" &&
+              mode === "preview" &&
+              supportsPhoneFrame(artifact.type)
+            }
+          >
+            <ArtifactRenderer
+              artifact={artifact}
+              version={shownVersion}
+              mode={mode}
+            />
+          </DeviceFrame>
+        )}
       </div>
 
       {exportError && (
