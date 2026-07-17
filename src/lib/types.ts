@@ -700,6 +700,10 @@ export interface McpConnectResponse {
  * - "mermaid"  — a Mermaid diagram rendered in a sandboxed iframe (CDN)
  * - "react"    — an interactive React component rendered in a sandboxed iframe
  *                (Babel-standalone + esm.sh import map)
+ * - "mobile"   — a single-file React Native app, rendered live via
+ *                react-native-web in the SAME sandboxed iframe (Babel-standalone +
+ *                esm.sh import map). Mounted with RNW's AppRegistry, shown in a
+ *                phone frame. Publishes like any other type.
  */
 export type ArtifactType =
   | "code"
@@ -708,7 +712,8 @@ export type ArtifactType =
   | "svg"
   | "image"
   | "mermaid"
-  | "react";
+  | "react"
+  | "mobile";
 
 /** All artifact types, in display order. */
 export const ARTIFACT_TYPES: ArtifactType[] = [
@@ -719,6 +724,7 @@ export const ARTIFACT_TYPES: ArtifactType[] = [
   "image",
   "mermaid",
   "react",
+  "mobile",
 ];
 
 /** Whether an artifact type has a distinct rendered "Preview" (vs. code-only). */
@@ -832,8 +838,17 @@ export interface ArtifactSnapshot {
  * The content kinds a Site can render. This is the artifact preview set MINUS
  * "code" (a Site is a rendered page, not source). `image` is reachable only via
  * publish-from-artifact; the model builds sites with SITE_BUILDABLE_TYPES.
+ * "mobile" is a React Native app rendered via react-native-web (see
+ * buildMobileSrcDoc), so a published mobile artifact serves as a live web preview.
  */
-export type SiteType = "html" | "markdown" | "svg" | "image" | "mermaid" | "react";
+export type SiteType =
+  | "html"
+  | "markdown"
+  | "svg"
+  | "image"
+  | "mermaid"
+  | "react"
+  | "mobile";
 
 /** All site content types, in display order. */
 export const SITE_TYPES: SiteType[] = [
@@ -843,6 +858,7 @@ export const SITE_TYPES: SiteType[] = [
   "image",
   "mermaid",
   "react",
+  "mobile",
 ];
 
 /** True if `v` is a valid SiteType. */

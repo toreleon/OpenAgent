@@ -23,8 +23,11 @@ import { isSiteType } from "@/lib/types";
 const TYPE_DESCRIPTION =
   "The artifact kind: 'markdown' (a rich text document), 'html' (a self-contained " +
   "web page rendered in a sandboxed iframe), 'svg' (an SVG image), 'image' (an " +
-  "image or data URL), 'mermaid' (a Mermaid diagram), or " +
-  "'react' (a self-contained interactive React component with a default export). " +
+  "image or data URL), 'mermaid' (a Mermaid diagram), " +
+  "'react' (a self-contained interactive React component with a default export), or " +
+  "'mobile' (a self-contained React Native app — a real mobile app previewed live " +
+  "in a phone frame via react-native-web). Use 'mobile' when the user asks for a " +
+  "MOBILE / iOS / Android / phone app; use 'react' for a web app or web UI. " +
   "There is NO 'code' kind — never make an artifact out of plain source code.";
 
 export const createArtifactTool: Tool = tool({
@@ -47,7 +50,7 @@ export const createArtifactTool: Tool = tool({
           "rewrite_artifact to revise it.",
       ),
     type: z
-      .enum(["markdown", "html", "svg", "image", "mermaid", "react"])
+      .enum(["markdown", "html", "svg", "image", "mermaid", "react", "mobile"])
       .describe(TYPE_DESCRIPTION),
     title: z
       .string()
@@ -57,7 +60,10 @@ export const createArtifactTool: Tool = tool({
       .describe(
         "The FULL artifact content. For 'react', export the root component as the " +
           "default export and import any libraries (react, recharts, lucide-react) " +
-          "normally. For 'html', output a complete, self-contained document.",
+          "normally. For 'mobile', write a single-file React Native app: export the " +
+          "root component as the default export and import from 'react-native' " +
+          "(View, Text, StyleSheet, ScrollView, Pressable, TextInput, FlatList, …). " +
+          "For 'html', output a complete, self-contained document.",
       ),
   }),
   async execute({ identifier }) {
@@ -159,7 +165,7 @@ export const publishArtifactTool: Tool = tool({
       if (!isSiteType(artifact.type)) {
         return (
           `The "${identifier}" artifact is type "${artifact.type}", which can't be published — ` +
-          "only html, react, markdown, svg, or mermaid can. Nothing was published."
+          "only html, react, mobile, markdown, svg, or mermaid can. Nothing was published."
         );
       }
       if (!artifact.versions[0]) {

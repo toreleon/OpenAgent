@@ -22,6 +22,7 @@ const STATUS_META: Record<SiteStatus, { label: string; className: string }> = {
 const FILTER_OPTIONS: Array<{ value: "all" | ArtifactType; label: string }> = [
   { value: "all", label: "All artifacts" },
   { value: "react", label: "React" },
+  { value: "mobile", label: "Mobile" },
   { value: "html", label: "HTML" },
   { value: "image", label: "Image" },
   { value: "markdown", label: "Markdown" },
