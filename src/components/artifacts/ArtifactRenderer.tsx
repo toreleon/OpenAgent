@@ -8,6 +8,7 @@ import { SvgArtifact } from "./renderers/SvgArtifact";
 import { ImageArtifact } from "./renderers/ImageArtifact";
 import { MermaidArtifact } from "./renderers/MermaidArtifact";
 import { ReactArtifact } from "./renderers/ReactArtifact";
+import { MobileArtifact } from "./renderers/MobileArtifact";
 
 /**
  * Chooses the correct renderer for an artifact + view mode.
@@ -45,6 +46,8 @@ function codeLanguageFor(artifact: Artifact): string | undefined {
     case "markdown":
       return "markdown";
     case "react":
+      return "jsx";
+    case "mobile":
       return "jsx";
     default:
       return undefined;
@@ -89,6 +92,8 @@ function renderPreview(
       return <MermaidArtifact content={content} />;
     case "react":
       return <ReactArtifact content={content} />;
+    case "mobile":
+      return <MobileArtifact content={content} />;
     case "code":
     default:
       // "code" artifacts have no separate preview — show the source.

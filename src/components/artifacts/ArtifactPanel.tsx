@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Boxes,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code,
@@ -14,6 +15,8 @@ import {
   FileText,
   GitBranch,
   Image as ImageIcon,
+  Monitor,
+  Smartphone,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -24,6 +27,9 @@ import { IconButton } from "@/components/ui/IconButton";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/components/ui/cn";
 import { ArtifactRenderer } from "./ArtifactRenderer";
+import { DeviceFrame } from "./DeviceFrame";
+import { SnackEmbed } from "./SnackEmbed";
+import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { PublishSiteButton } from "@/components/sites/PublishSiteButton";
 
 /** lucide icon shown next to the title for each artifact type. */
@@ -35,6 +41,7 @@ const TYPE_ICONS: Record<ArtifactType, LucideIcon> = {
   image: ImageIcon,
   mermaid: GitBranch,
   react: Boxes,
+  mobile: Smartphone,
 };
 
 /**
@@ -75,9 +82,32 @@ function extensionFor(artifact: Artifact): string {
       return ".mmd";
     case "react":
       return ".jsx";
+    case "mobile":
+      return ".tsx";
     default:
       return ".txt";
   }
+}
+
+/**
+ * Artifact types that make sense to preview inside a phone frame: the app-like
+ * types. A static image / SVG / diagram / prose doc gains nothing from a bezel, so
+ * the viewport toggle is hidden for them.
+ */
+function supportsPhoneFrame(type: ArtifactType): boolean {
+  return type === "mobile" || type === "react" || type === "html";
+}
+
+/** Trigger a browser download of `blob` as `filename` (shared by the actions). */
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -97,13 +127,24 @@ export function ArtifactPanel() {
 
   // View mode is local UI state; default to Preview for previewable types.
   const [mode, setMode] = useState<"preview" | "code">("preview");
+  // Preview viewport chrome: "phone" wraps the renderer in a device frame.
+  const [viewport, setViewport] = useState<"desktop" | "phone">("desktop");
+  // Mobile preview engine: "local" (react-native-web, instant) or "snack" (the
+  // real Expo runtime via an embedded Snack player — resolves npm libraries).
+  const [previewEngine, setPreviewEngine] = useState<"local" | "snack">("local");
+  // Non-null while the last Capacitor export failed, shown to the user.
+  const [exportError, setExportError] = useState<string | null>(null);
   const { copied, copy } = useCopyToClipboard();
 
   // Reset the view mode whenever the open artifact (or its type) changes, so a
   // freshly-opened code-only artifact doesn't get stuck on a hidden Preview tab.
+  // "mobile" artifacts default to the phone frame; everything else to desktop.
   useEffect(() => {
     if (artifact) {
       setMode(artifactHasPreview(artifact.type) ? "preview" : "code");
+      setViewport(artifact.type === "mobile" ? "phone" : "desktop");
+      setPreviewEngine("local");
+      setExportError(null);
     }
   }, [artifact?.id, artifact?.type]);
 
@@ -122,6 +163,15 @@ export function ArtifactPanel() {
 
   const hasPreview = artifactHasPreview(artifact.type);
   const TypeIcon = TYPE_ICONS[artifact.type];
+
+  const isMobile = artifact.type === "mobile";
+  const inPreview = hasPreview && mode === "preview";
+  // The Snack (real Expo runtime) engine is a mobile-only preview option.
+  const usingSnack = isMobile && previewEngine === "snack";
+  // Snack brings its own device chrome, so the phone-frame viewport toggle only
+  // applies to the local react-native-web preview.
+  const showViewportToggle =
+    inPreview && supportsPhoneFrame(artifact.type) && !usingSnack;
 
   // Version navigation over the ordered version list.
   const idx = versions.findIndex((v) => v.version === shownVersion.version);
@@ -146,14 +196,27 @@ export function ArtifactPanel() {
     const blob = new Blob([shownVersion.content], {
       type: "text/plain;charset=utf-8",
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    triggerDownload(blob, filename);
+  };
+
+  // Download a ready-to-build native project for a mobile artifact:
+  //   "expo"      → a real single-file Expo/React Native project (native build via EAS)
+  //   "capacitor" → the web bundle wrapped in a Capacitor iOS/Android shell
+  // Surfaces failures instead of silently no-op'ing (the endpoint 4xx's on e.g. an
+  // artifact with no content yet).
+  const handleExport = async (format: "expo" | "capacitor") => {
+    setExportError(null);
+    try {
+      const res = await fetch(`/api/artifacts/${artifact.id}/${format}`);
+      if (!res.ok) {
+        setExportError("Couldn't export the project. Please try again.");
+        return;
+      }
+      const blob = await res.blob();
+      triggerDownload(blob, `${artifact.identifier || "app"}-${format}.zip`);
+    } catch {
+      setExportError("Couldn't export the project. Please try again.");
+    }
   };
 
   return (
@@ -203,6 +266,72 @@ export function ArtifactPanel() {
               </button>
             </div>
           )}
+          {isMobile && inPreview && (
+            <div className="flex items-center rounded-lg border border-border p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setPreviewEngine("local")}
+                aria-pressed={previewEngine === "local"}
+                title="Local preview (react-native-web, instant)"
+                className={cn(
+                  "inline-flex items-center rounded-md px-2 py-1 transition-colors",
+                  previewEngine === "local"
+                    ? "bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                Local
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewEngine("snack")}
+                aria-pressed={previewEngine === "snack"}
+                title="Expo Snack (real Expo runtime; resolves npm libraries; run on device)"
+                className={cn(
+                  "inline-flex items-center rounded-md px-2 py-1 transition-colors",
+                  previewEngine === "snack"
+                    ? "bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                Snack
+              </button>
+            </div>
+          )}
+          {showViewportToggle && (
+            <div className="flex items-center rounded-lg border border-border p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewport("desktop")}
+                aria-pressed={viewport === "desktop"}
+                aria-label="Desktop viewport"
+                title="Desktop viewport"
+                className={cn(
+                  "inline-flex items-center rounded-md px-2 py-1 transition-colors",
+                  viewport === "desktop"
+                    ? "bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                <Monitor size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewport("phone")}
+                aria-pressed={viewport === "phone"}
+                aria-label="Phone viewport"
+                title="Phone viewport"
+                className={cn(
+                  "inline-flex items-center rounded-md px-2 py-1 transition-colors",
+                  viewport === "phone"
+                    ? "bg-hover text-text-primary"
+                    : "text-text-secondary hover:text-text-primary",
+                )}
+              >
+                <Smartphone size={13} />
+              </button>
+            </div>
+          )}
           <IconButton label="Close artifact" size="sm" onClick={closeArtifact}>
             <X size={16} />
           </IconButton>
@@ -242,10 +371,34 @@ export function ArtifactPanel() {
         </div>
       )}
 
-      {/* Body: the renderer paints its own (often white) canvas here */}
+      {/* Body: the renderer paints its own (often white) canvas here. DeviceFrame
+          always wraps it (so the preview iframe keeps its identity across viewport
+          toggles) and draws the phone bezel only when `enabled`. */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        <ArtifactRenderer artifact={artifact} version={shownVersion} mode={mode} />
+        {usingSnack && mode === "preview" ? (
+          <SnackEmbed content={shownVersion.content} name={artifact.title} />
+        ) : (
+          <DeviceFrame
+            enabled={
+              viewport === "phone" &&
+              mode === "preview" &&
+              supportsPhoneFrame(artifact.type)
+            }
+          >
+            <ArtifactRenderer
+              artifact={artifact}
+              version={shownVersion}
+              mode={mode}
+            />
+          </DeviceFrame>
+        )}
       </div>
+
+      {exportError && (
+        <div className="shrink-0 border-t border-border px-4 py-1.5 text-xs text-danger">
+          {exportError}
+        </div>
+      )}
 
       {/* Footer: Publish-as-Site (preview types) + Copy + Download */}
       <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-2">
@@ -255,6 +408,52 @@ export function ArtifactPanel() {
             title={artifact.title}
             className="mr-auto inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
           />
+        )}
+        {artifact.type === "mobile" && (
+          <Dropdown
+            side="top"
+            align="start"
+            trigger={
+              <button
+                type="button"
+                title="Download a buildable native project for this app"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+              >
+                <Smartphone size={14} />
+                Export app
+                <ChevronDown size={13} />
+              </button>
+            }
+          >
+            {(close) => (
+              <>
+                <DropdownItem
+                  onClick={() => {
+                    close();
+                    void handleExport("expo");
+                  }}
+                >
+                  <Smartphone size={15} />
+                  <span>
+                    Expo project{" "}
+                    <span className="text-text-secondary">· native (EAS)</span>
+                  </span>
+                </DropdownItem>
+                <DropdownItem
+                  onClick={() => {
+                    close();
+                    void handleExport("capacitor");
+                  }}
+                >
+                  <Boxes size={15} />
+                  <span>
+                    Capacitor{" "}
+                    <span className="text-text-secondary">· web wrapper</span>
+                  </span>
+                </DropdownItem>
+              </>
+            )}
+          </Dropdown>
         )}
         <button
           type="button"

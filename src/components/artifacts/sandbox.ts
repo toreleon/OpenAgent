@@ -18,6 +18,7 @@
  * and can only reach the pinned CDNs below — never the app's own API.
  */
 import type { SiteType } from "@/lib/types";
+import { PREVIEW_REACT_VERSION, PREVIEW_RNW_VERSION } from "@/lib/mobile-runtime";
 
 // Pinned CDN URLs — kept here so every renderer resolves the same versions.
 const BABEL_URL = "https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js";
@@ -44,6 +45,33 @@ const REACT_IMPORT_MAP = {
   },
 };
 
+// Import map for `mobile` (React Native) artifacts. `react-native` is aliased to
+// react-native-web so RN primitives render in the browser with no native build.
+// react-native-web is `?external=react,react-dom` so it shares the SINGLE react
+// instance loaded here (the same de-dup that avoids "invalid hook call" in
+// REACT_IMPORT_MAP). Both hosts are esm.sh, already in SITE_CDN_HOSTS — so the CSP
+// allow-list is unchanged.
+//
+// DELIBERATELY MINIMAL — empirically validated in-browser (see the Phase-1 spike).
+// The RN ecosystem libraries that seem obvious to add (react-navigation,
+// react-native-screens, react-native-safe-area-context, @expo/vector-icons,
+// expo-status-bar) all FAIL to resolve through esm.sh in the browser: they reach
+// for deep RN internals like `react-native/Libraries/Utilities/codegenNativeComponent`
+// that react-native-web does not implement. So this map is core-only; the model is
+// steered (in agent.ts) to state-based navigation, RNW's built-in SafeAreaView /
+// StatusBar, and emoji/View icons instead of those packages. Do NOT add an RN
+// library here without first confirming it resolves + renders in the sandbox.
+const MOBILE_IMPORT_MAP = {
+  imports: {
+    react: `https://esm.sh/react@${PREVIEW_REACT_VERSION}`,
+    "react/jsx-runtime": `https://esm.sh/react@${PREVIEW_REACT_VERSION}/jsx-runtime`,
+    "react-dom": `https://esm.sh/react-dom@${PREVIEW_REACT_VERSION}`,
+    "react-dom/client": `https://esm.sh/react-dom@${PREVIEW_REACT_VERSION}/client`,
+    "react-native": `https://esm.sh/react-native-web@${PREVIEW_RNW_VERSION}?external=react,react-dom`,
+    "react-native-web": `https://esm.sh/react-native-web@${PREVIEW_RNW_VERSION}?external=react,react-dom`,
+  },
+};
+
 /** Escape a string for safe insertion as HTML *text* (e.g. inside <pre>). */
 function escapeHtml(input: string): string {
   return input
@@ -59,6 +87,23 @@ function escapeHtml(input: string): string {
 function guardScript(source: string): string {
   return source.replace(/<\/script/gi, "<\\/script");
 }
+
+/**
+ * Inline error surface shared by the React + mobile sandboxes: on a thrown error
+ * or unhandled rejection it swaps the #root mount point for a `<pre id="__err">`
+ * and prints the message there, so a failed compile/runtime shows text instead of
+ * a blank frame. Each builder styles `#__err` in its own <style>.
+ */
+const SANDBOX_ERROR_SCRIPT = `<script>
+      function __showErr(x) {
+        var r = document.getElementById("root");
+        if (r) r.innerHTML = '<pre id="__err"></pre>';
+        var p = document.getElementById("__err");
+        if (p) p.textContent = String((x && x.stack) || x);
+      }
+      window.addEventListener("error", function (e) { __showErr(e.error || e.message); });
+      window.addEventListener("unhandledrejection", function (e) { __showErr(e.reason); });
+    </script>`;
 
 /** True when the HTML already looks like a complete document. */
 function isFullDocument(html: string): boolean {
@@ -177,16 +222,7 @@ export function buildReactSrcDoc(content: string): string {
   </head>
   <body>
     <div id="root"></div>
-    <script>
-      function __showErr(x) {
-        var r = document.getElementById("root");
-        if (r) r.innerHTML = '<pre id="__err"></pre>';
-        var p = document.getElementById("__err");
-        if (p) p.textContent = String((x && x.stack) || x);
-      }
-      window.addEventListener("error", function (e) { __showErr(e.error || e.message); });
-      window.addEventListener("unhandledrejection", function (e) { __showErr(e.reason); });
-    </script>
+    ${SANDBOX_ERROR_SCRIPT}
     <script type="text/babel" data-type="module" data-presets="react,typescript">
       import * as __ReactNS from "react";
       import { createRoot as __createRoot } from "react-dom/client";
@@ -200,6 +236,62 @@ export function buildReactSrcDoc(content: string): string {
         );
       } else {
         __showErr("This React artifact has no default export. Add e.g. export default function App() {}.");
+      }
+    </script>
+  </body>
+</html>`;
+}
+
+/**
+ * Build the srcdoc for a `mobile` artifact: a single-file React Native app.
+ *
+ * It mirrors {@link buildReactSrcDoc} — same in-browser Babel compile (JSX + TS),
+ * same `hoistDefaultExport`, same inline error surface — with three differences:
+ *  1. the import map aliases `react-native` → react-native-web (see
+ *     {@link MOBILE_IMPORT_MAP}), so RN primitives render in the browser;
+ *  2. the root is mounted via RNW's `AppRegistry.runApplication` (not
+ *     `createRoot`), which installs RNW's flex-column root reset so RN layout is
+ *     faithful; and
+ *  3. no Tailwind — RN styles come from `StyleSheet`, not classNames.
+ *
+ * The document fills its viewport (the "device screen"); the phone bezel is drawn
+ * by the panel/preview chrome around this frame, NOT baked in here — so the SAME
+ * srcdoc renders identically in the in-app preview and on the published page.
+ */
+export function buildMobileSrcDoc(content: string): string {
+  const userCode = guardScript(hoistDefaultExport(content));
+  const importMap = JSON.stringify(MOBILE_IMPORT_MAP);
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <script src="${BABEL_URL}"></script>
+    <script type="importmap">${importMap}</script>
+    <style>
+      html, body { margin: 0; height: 100%; background: #ffffff; color: #111827; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+      #root { display: flex; height: 100%; min-height: 100vh; }
+      #root > * { flex: 1; }
+      #__err { color: #b00020; white-space: pre-wrap; padding: 16px; font: 13px/1.5 ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    ${SANDBOX_ERROR_SCRIPT}
+    <script type="text/babel" data-type="module" data-presets="react,typescript">
+      import * as __ReactNS from "react";
+      import { AppRegistry } from "react-native";
+      window.React = __ReactNS.default || __ReactNS;
+      ${userCode}
+      let __C = window.__ArtifactComponent;
+      try { if (!__C && typeof App !== "undefined") __C = App; } catch (e) {}
+      if (__C) {
+        AppRegistry.registerComponent("MobileApp", () => __C);
+        AppRegistry.runApplication("MobileApp", {
+          rootTag: document.getElementById("root"),
+        });
+      } else {
+        __showErr("This mobile artifact has no default export. Add e.g. export default function App() {}.");
       }
     </script>
   </body>
@@ -281,6 +373,8 @@ export function buildSiteSrcDoc(type: SiteType, content: string): string {
   switch (type) {
     case "react":
       return buildReactSrcDoc(content);
+    case "mobile":
+      return buildMobileSrcDoc(content);
     case "svg":
       return buildSvgSrcDoc(content);
     case "mermaid":

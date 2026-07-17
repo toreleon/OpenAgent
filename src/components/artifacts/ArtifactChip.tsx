@@ -10,6 +10,7 @@ import {
   GitBranch,
   Image,
   Maximize2,
+  Smartphone,
   type LucideIcon,
 } from "lucide-react";
 import type { ArtifactCommand, ArtifactRef, ArtifactType } from "@/lib/types";
@@ -25,6 +26,7 @@ const TYPE_ICONS: Record<ArtifactType, LucideIcon> = {
   image: Image,
   mermaid: GitBranch,
   react: Boxes,
+  mobile: Smartphone,
 };
 
 /** Past-tense verb describing what this message did to the artifact. */
