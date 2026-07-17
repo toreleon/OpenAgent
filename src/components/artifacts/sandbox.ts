@@ -18,6 +18,7 @@
  * and can only reach the pinned CDNs below — never the app's own API.
  */
 import type { SiteType } from "@/lib/types";
+import { PREVIEW_REACT_VERSION, PREVIEW_RNW_VERSION } from "@/lib/mobile-runtime";
 
 // Pinned CDN URLs — kept here so every renderer resolves the same versions.
 const BABEL_URL = "https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js";
@@ -62,12 +63,12 @@ const REACT_IMPORT_MAP = {
 // library here without first confirming it resolves + renders in the sandbox.
 const MOBILE_IMPORT_MAP = {
   imports: {
-    react: "https://esm.sh/react@18.3.1",
-    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-    "react-dom": "https://esm.sh/react-dom@18.3.1",
-    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "react-native": "https://esm.sh/react-native-web@0.19.13?external=react,react-dom",
-    "react-native-web": "https://esm.sh/react-native-web@0.19.13?external=react,react-dom",
+    react: `https://esm.sh/react@${PREVIEW_REACT_VERSION}`,
+    "react/jsx-runtime": `https://esm.sh/react@${PREVIEW_REACT_VERSION}/jsx-runtime`,
+    "react-dom": `https://esm.sh/react-dom@${PREVIEW_REACT_VERSION}`,
+    "react-dom/client": `https://esm.sh/react-dom@${PREVIEW_REACT_VERSION}/client`,
+    "react-native": `https://esm.sh/react-native-web@${PREVIEW_RNW_VERSION}?external=react,react-dom`,
+    "react-native-web": `https://esm.sh/react-native-web@${PREVIEW_RNW_VERSION}?external=react,react-dom`,
   },
 };
 

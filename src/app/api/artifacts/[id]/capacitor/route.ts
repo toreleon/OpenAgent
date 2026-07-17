@@ -1,8 +1,10 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import prisma from "@/lib/db";
 import { buildSiteSrcDoc } from "@/components/artifacts/sandbox";
-import { makeZip } from "@/lib/zip";
+import {
+  bundleId,
+  loadOwnedArtifactForExport,
+  slugify,
+  zipResponse,
+} from "@/lib/artifact-export";
 import { isSiteType, type ApiError, type SiteType } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -17,39 +19,14 @@ export const runtime = "nodejs";
  *
  * Auth: the artifact must belong to a conversation owned by the session user.
  */
-function slugify(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "app"
-  );
-}
-
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } },
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id) {
-    return Response.json({ error: "Unauthorized" } satisfies ApiError, { status: 401 });
-  }
+  const loaded = await loadOwnedArtifactForExport(params.id);
+  if (!loaded.ok) return loaded.res;
+  const { artifact } = loaded;
 
-  const artifact = await prisma.artifact.findFirst({
-    where: { id: params.id, conversation: { userId: session.user.id } },
-    include: { versions: { orderBy: { version: "desc" }, take: 1 } },
-  });
-  if (!artifact) {
-    return Response.json({ error: "Artifact not found" } satisfies ApiError, { status: 404 });
-  }
-  const version = artifact.versions[0];
-  if (!version) {
-    return Response.json(
-      { error: "Artifact has no content yet" } satisfies ApiError,
-      { status: 400 },
-    );
-  }
   if (!isSiteType(artifact.type)) {
     return Response.json(
       { error: `Type "${artifact.type}" can't be exported as an app` } satisfies ApiError,
@@ -58,9 +35,9 @@ export async function GET(
   }
 
   const slug = slugify(artifact.identifier || artifact.title);
-  const appId = `app.openagent.${slug.replace(/-/g, "")}`;
+  const appId = bundleId(slug);
   const appName = artifact.title || slug;
-  const indexHtml = buildSiteSrcDoc(artifact.type as SiteType, version.content);
+  const indexHtml = buildSiteSrcDoc(artifact.type as SiteType, artifact.content);
 
   const files: Record<string, string> = {
     "capacitor.config.json": JSON.stringify(
@@ -114,15 +91,5 @@ export async function GET(
     ].join("\n"),
   };
 
-  const zip = makeZip(files);
-  // Uint8Array is a valid BodyInit at runtime (undici); the DOM lib's typed-array
-  // generic is just conservative, so cast rather than copy the bytes.
-  return new Response(zip as unknown as BodyInit, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${slug}-capacitor.zip"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  return zipResponse(files, `${slug}-capacitor.zip`);
 }

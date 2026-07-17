@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Boxes,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Code,
@@ -27,6 +28,7 @@ import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { cn } from "@/components/ui/cn";
 import { ArtifactRenderer } from "./ArtifactRenderer";
 import { DeviceFrame } from "./DeviceFrame";
+import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { PublishSiteButton } from "@/components/sites/PublishSiteButton";
 
 /** lucide icon shown next to the title for each artifact type. */
@@ -183,21 +185,23 @@ export function ArtifactPanel() {
     triggerDownload(blob, filename);
   };
 
-  // Download a ready-to-build Capacitor project (mobile artifacts) that wraps the
-  // app as an installable iOS/Android shell. Surfaces failures instead of silently
-  // no-op'ing (the endpoint 4xx's on e.g. an artifact with no content yet).
-  const handleExportCapacitor = async () => {
+  // Download a ready-to-build native project for a mobile artifact:
+  //   "expo"      → a real single-file Expo/React Native project (native build via EAS)
+  //   "capacitor" → the web bundle wrapped in a Capacitor iOS/Android shell
+  // Surfaces failures instead of silently no-op'ing (the endpoint 4xx's on e.g. an
+  // artifact with no content yet).
+  const handleExport = async (format: "expo" | "capacitor") => {
     setExportError(null);
     try {
-      const res = await fetch(`/api/artifacts/${artifact.id}/capacitor`);
+      const res = await fetch(`/api/artifacts/${artifact.id}/${format}`);
       if (!res.ok) {
-        setExportError("Couldn't export the app project. Please try again.");
+        setExportError("Couldn't export the project. Please try again.");
         return;
       }
       const blob = await res.blob();
-      triggerDownload(blob, `${artifact.identifier || "app"}-capacitor.zip`);
+      triggerDownload(blob, `${artifact.identifier || "app"}-${format}.zip`);
     } catch {
-      setExportError("Couldn't export the app project. Please try again.");
+      setExportError("Couldn't export the project. Please try again.");
     }
   };
 
@@ -356,15 +360,50 @@ export function ArtifactPanel() {
           />
         )}
         {artifact.type === "mobile" && (
-          <button
-            type="button"
-            onClick={handleExportCapacitor}
-            title="Download a ready-to-build Capacitor (iOS/Android) project"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+          <Dropdown
+            side="top"
+            align="start"
+            trigger={
+              <button
+                type="button"
+                title="Download a buildable native project for this app"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
+              >
+                <Smartphone size={14} />
+                Export app
+                <ChevronDown size={13} />
+              </button>
+            }
           >
-            <Smartphone size={14} />
-            Export app
-          </button>
+            {(close) => (
+              <>
+                <DropdownItem
+                  onClick={() => {
+                    close();
+                    void handleExport("expo");
+                  }}
+                >
+                  <Smartphone size={15} />
+                  <span>
+                    Expo project{" "}
+                    <span className="text-text-secondary">· native (EAS)</span>
+                  </span>
+                </DropdownItem>
+                <DropdownItem
+                  onClick={() => {
+                    close();
+                    void handleExport("capacitor");
+                  }}
+                >
+                  <Boxes size={15} />
+                  <span>
+                    Capacitor{" "}
+                    <span className="text-text-secondary">· web wrapper</span>
+                  </span>
+                </DropdownItem>
+              </>
+            )}
+          </Dropdown>
         )}
         <button
           type="button"
